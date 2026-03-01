@@ -1,5 +1,5 @@
 # Stride — Project Status
-Last updated: 2026-02-28
+Last updated: 2026-03-01
 
 ---
 
@@ -9,7 +9,7 @@ An AI productivity coach delivered via SMS. Users set goals, check in daily,
 and review progress weekly. The Scrum framework runs entirely under the hood —
 users never see it. Plain language only.
 
-**Interface:** SMS (Twilio A2P) → AWS Lambda → Strands AI agent → DynamoDB
+**Interface:** SMS (Twilio A2P 10DLC) → AWS Lambda → Strands AI agent → DynamoDB
 
 ---
 
@@ -18,12 +18,16 @@ users never see it. Plain language only.
 | Phase | Status | Description |
 |---|---|---|
 | **Sprint 0** | ✅ Done | Jupyter notebooks — proved Strands agent + tools + DynamoDB |
-| **Sprint 1** | 🔄 In progress | Lambda stubs deployed, Terraform written, SMS wired |
-| **Sprint 2** | ⏳ Not started | Real agent logic in handlers, opt-in flow, pattern learning |
+| **Sprint 1** | ✅ Done | Renamed to Stride, Terraform written, Lambda stubs, SMS migration |
+| **Sprint 2** | ✅ Code done | Real handlers, consent flow, onboarding — all locally tested and passing |
+| **Sprint 3** | ⏳ Not started | Auth, Secrets Manager, proactive outbound SMS, pattern auto-update |
+
+**Current state:** Initial git commit made (f6a31fb). Code is ready to push and deploy.
+**Next action: push to GitHub → bootstrap Terraform → `terraform apply`**
 
 ---
 
-## What Is Built and Verified
+## What Is Built and Verified (all locally tested ✅)
 
 ### Shared library (`scrumbot-app/shared/`)
 
@@ -32,7 +36,7 @@ users never see it. Plain language only.
 
 | Model | Key fields |
 |---|---|
-| `User` | user_id, name, email, created_at |
+| `User` | user_id, name, email, **phone**, **onboarded**, created_at |
 | `Project` | project_id, user_id, name, description, created_at |
 | `WorkCycle` | cycle_id, project_id, name, goal, start_date, end_date, status |
 | `Task` | task_id, cycle_id, title, description, estimate (pts), estimate_label, status |
@@ -41,41 +45,51 @@ users never see it. Plain language only.
 | `Velocity` | cycle_id, project_id, planned_points, delivered_points, cycle_name |
 | `UserPattern` | user_id, avg_pace, avg_completion_rate, common_blockers, cycle_count |
 
-All use `model_dump()` for DynamoDB writes. No ORM. No Pydantic v1 syntax.
+`User.phone` and `User.onboarded` added in Sprint 2. All use `model_dump()` for DynamoDB writes.
 
 ---
 
-#### `tools.py` ✅ — 10 tools total
+#### `tools.py` ✅ — 13 tools total
 
 All `@tool` decorated, all return `dict`, all catch exceptions.
 
-| Tool | Purpose | DynamoDB operation |
-|---|---|---|
-| `create_project` | Create a new project for a user | PutItem `USER#{user_id}` / `PROJECT#{project_id}` |
-| `create_work_cycle` | Create a work cycle under a project | PutItem `PROJECT#{project_id}` / `CYCLE#{cycle_id}` |
-| `list_active_projects` | List all projects + their active cycle | Query `USER#{user_id}` begins_with `PROJECT#` |
-| `create_task` | Add task to a cycle (S/M/L/XL estimate) | PutItem `CYCLE#{cycle_id}` / `TASK#{task_id}` |
-| `update_task_status` | Move task to todo/in_progress/done/blocked | UpdateItem via GSI1 lookup |
-| `get_cycle_data` | Get cycle + all its tasks | Query `CYCLE#{cycle_id}` begins_with `TASK#` |
-| `create_checkin` | Record daily check-in (did/doing/blocked) | PutItem `USER#{user_id}` / `CHECKIN#{date}#{id}` |
-| `flag_blocker` | Log a blocker against a task | PutItem `TASK#{task_id}` / `BLOCKER#{id}` |
-| `get_pace_history` | Pace records + trend for a project | Query `PROJECT#{project_id}` begins_with `VELOCITY#` |
-| `get_user_patterns` | Aggregated user habits | GetItem `USER#{user_id}` / `PATTERN#AGGREGATE` |
+| Tool | Purpose |
+|---|---|
+| `create_project` | Create a new project for a user |
+| `create_work_cycle` | Create a new work cycle (week) under a project |
+| `list_active_projects` | List all projects + their active cycle |
+| `create_task` | Add a task to a work cycle (S/M/L/XL estimate) |
+| `update_task_status` | Move a task to todo / in_progress / done / blocked |
+| `get_cycle_data` | Get a work cycle + all its tasks |
+| `create_checkin` | Record a daily check-in (did / doing / blocked) |
+| `flag_blocker` | Log a blocker against a specific task |
+| `get_pace_history` | Retrieve pace records for a project + compute trend |
+| `get_user_patterns` | Retrieve aggregated patterns for a user |
+| `record_velocity` | Write pace result after a cycle ends (planned vs delivered) |
+| `update_user_patterns` | Update rolling averages after a weekly review |
+| `complete_onboarding` | Mark a user as onboarded after first project + cycle + task created |
 
-Estimate model: `S=2pts, M=5pts, L=8pts, XL=13pts (scope risk flag)`
-
----
-
-#### `prompt.py` ✅
-Single-source `STRIDE_SYSTEM_PROMPT`. Covers 5 session types, estimate rules,
-scope boundary (non-negotiable — off-topic replies return exactly 2 sentences).
+**Critical:** `avg_pace` and `avg_completion_rate` are written as `Decimal(str(value))` — Python `float` raises `TypeError` in boto3.
 
 ---
 
 #### `db.py` ✅
+
+**Connection:**
 - `get_table()` — boto3 Table factory, reads `DYNAMODB_TABLE_NAME` + `AWS_ENDPOINT_URL`
-- `increment_rate_limit(user_id)` — atomic ADD counter `USER#{id}` / `RATELIMIT#{date}`, returns 0 on error (fail open)
-- `log_blocked_attempt(user_id, reason, preview)` — writes `USER#{id}` / `BLOCKED#{timestamp}`, errors swallowed
+
+**Rate limiting + blocked log:**
+- `increment_rate_limit(user_id)` — atomic ADD counter, returns 0 on error (fail open)
+- `log_blocked_attempt(user_id, reason, preview)` — writes `BLOCKED#{timestamp}`, errors swallowed
+
+**SMS consent:**
+- `get_consent(user_id)` — returns `CONSENT#SMS` item or None (fail open)
+- `record_consent(user_id, phone)` — writes active consent, returns bool
+- `revoke_consent(user_id)` — sets status=revoked, returns bool
+
+**User bootstrap:**
+- `get_or_create_user(user_id, phone)` — race-safe: conditional PutItem, catches `ConditionalCheckFailedException`
+- `set_onboarded(user_id)` — sets `onboarded=True` on `USER#METADATA`, returns bool
 
 ---
 
@@ -85,32 +99,33 @@ scope boundary (non-negotiable — off-topic replies return exactly 2 sentences)
 
 ---
 
+#### `prompt.py` ✅
+Single-source `STRIDE_SYSTEM_PROMPT`. Covers all 5 session types, estimate rules,
+plain language rules. Imported by both Lambda handlers.
+
+---
+
 ### Lambda handlers (`scrumbot-app/functions/`)
 
 | Handler | Route | Status | What it does |
 |---|---|---|---|
-| `checkin/handler.py` | `POST /checkin` | ⚠️ Stub | Returns `{"checkin_id": "stub", "message": "Check-in received"}` |
-| `agent/handler.py` | `POST /ceremony` | ⚠️ Stub | Returns `{"reply": "stub", "history": []}` |
-| `sms/handler.py` | `POST /sms` | ⚠️ Stub | Full guard chain works; returns stub reply after guards pass |
+| `checkin/handler.py` | `POST /checkin` | ✅ Real | Direct tool calls — `create_checkin`, auto-flags blocker if `blocked` field non-empty |
+| `agent/handler.py` | `POST /ceremony` | ✅ Real | Strands agent, 20-turn history cap, returns `{reply, history}` |
+| `sms/handler.py` | `POST /sms` | ✅ Real | Full 10-step guard chain + consent flow + onboarding detection |
 
-All three: Powertools `Logger` + `Tracer` + `APIGatewayHttpResolver`, both
-decorators on `handler()`. No `print()`.
+**SMS handler 10-step guard chain (fully implemented):**
+1. Twilio signature validation → 403 if invalid
+2. Parse `From` (user_id) + `Body`
+3. `check_message()` → block if empty or >500 chars
+4. `check_rate_limit()` → block if >50 msgs/day
+5. STOP keyword → `revoke_consent()`, unsubscribe reply
+6. HELP keyword → help text, no agent
+7. `get_consent()` → no consent: send opt-in prompt; YES reply: `record_consent()` + welcome
+8. `get_or_create_user()` → bootstrap `USER#` record
+9. Onboarding check → inject setup instructions if `user.onboarded=False`
+10. Agent call → `_call_agent()`, truncate reply at 1600 chars at sentence boundary
 
-**`sms/handler.py` guard chain (fully implemented):**
-1. Twilio signature validation (`RequestValidator`)
-2. Message length/empty check (`check_message`)
-3. Per-user rate limit — 50 msgs/day (`check_rate_limit`)
-4. → Agent (currently stub, wired in Sprint 2)
-
----
-
-### Local dev tools (`scrumbot-app/`)
-
-| File | Purpose |
-|---|---|
-| `chat.py` | Interactive CLI — Strands Agent + all 10 tools, history preserved across turns |
-| `local_server.py` | Flask HTTP server — `GET /health`, `POST /checkin`, `POST /ceremony` with guards |
-| `.env` | Local config — LocalStack endpoint, dummy AWS creds, Anthropic key |
+All errors return generic TwiML — stack traces never exposed via SMS.
 
 ---
 
@@ -119,18 +134,18 @@ decorators on `handler()`. No `print()`.
 | File | Status | What it creates |
 |---|---|---|
 | `bootstrap/main.tf` | ✅ Written | S3 `stride-tf-state` + DynamoDB `stride-tf-locks` (run once) |
-| `versions.tf` | ✅ Written | Terraform ≥1.7, AWS provider ~>5.0, S3 backend config |
-| `variables.tf` | ✅ Written | anthropic_api_key, twilio creds, environment, region, table name |
-| `dynamodb.tf` | ✅ Written | `stride-prod` table — PAY_PER_REQUEST, pk/sk + GSI1 (gsi1pk/gsi1sk), PITR on |
+| `versions.tf` | ✅ Written | Terraform ≥1.7, AWS provider ~>5.0, S3 backend |
+| `variables.tf` | ✅ Written | anthropic_api_key, twilio creds x3, environment, region, table name |
+| `dynamodb.tf` | ✅ Written | `stride-prod` — PAY_PER_REQUEST, pk/sk + GSI1 (gsi1pk/gsi1sk), PITR on |
 | `iam.tf` | ✅ Written | Role `stride-lambda-exec` — BasicExecution + DynamoDB inline + X-Ray inline |
-| `lambda.tf` | ✅ Written | 3 functions: `stride-checkin` (256MB/10s), `stride-agent` (512MB/30s), `stride-sms` (256MB/10s) |
+| `lambda.tf` | ✅ Written | `stride-checkin` (256MB/10s), `stride-agent` (512MB/30s), `stride-sms` (256MB/10s) |
 | `api_gateway.tf` | ✅ Written | HTTP API `stride-api` — `POST /checkin`, `POST /ceremony`, `POST /sms` |
 | `outputs.tf` | ✅ Written | api_gateway_url, function names, table name |
-| `terraform.tfvars.example` | ✅ Written | Template — all vars, empty values, committed to git |
+| `terraform.tfvars.example` | ✅ Written | Template committed; actual `terraform.tfvars` is gitignored |
 | `.github/workflows/terraform.yml` | ✅ Written | PR → fmt/validate/plan; main push → apply; OIDC auth |
 
-**`terraform.tfvars` (not committed — contains secrets) has NOT been created yet.**
-**`terraform apply` has NOT been run yet.**
+`terraform.tfvars` (contains secrets) has **not been created yet**.
+`terraform apply` has **not been run yet**.
 
 ---
 
@@ -140,18 +155,31 @@ decorators on `handler()`. No `print()`.
 **Keys:** `pk` (String) / `sk` (String)
 **GSI:** `gsi1` — `gsi1pk` / `gsi1sk`, projection ALL
 
-| Entity | PK | SK | GSI1PK | GSI1SK |
-|---|---|---|---|---|
-| User | `USER#{user_id}` | `#METADATA` | — | — |
-| Project | `USER#{user_id}` | `PROJECT#{project_id}` | `PROJECT#{project_id}` | `#METADATA` |
-| Work cycle | `PROJECT#{project_id}` | `CYCLE#{cycle_id}` | `CYCLE#{cycle_id}` | `#METADATA` |
-| Task | `CYCLE#{cycle_id}` | `TASK#{task_id}` | `TASK#{task_id}` | `STATUS#{status}` |
-| Check-in | `USER#{user_id}` | `CHECKIN#{date}#{id}` | — | — |
-| Blocker | `TASK#{task_id}` | `BLOCKER#{blocker_id}` | — | — |
-| Velocity | `PROJECT#{project_id}` | `VELOCITY#{cycle_id}` | — | — |
-| Pattern | `USER#{user_id}` | `PATTERN#AGGREGATE` | — | — |
-| Rate limit | `USER#{user_id}` | `RATELIMIT#{YYYY-MM-DD}` | — | — |
-| Blocked log | `USER#{user_id}` | `BLOCKED#{iso_timestamp}` | — | — |
+| Entity | PK | SK |
+|---|---|---|
+| User | `USER#{user_id}` | `#METADATA` |
+| Project | `USER#{user_id}` | `PROJECT#{project_id}` |
+| Work cycle | `PROJECT#{project_id}` | `CYCLE#{cycle_id}` |
+| Task | `CYCLE#{cycle_id}` | `TASK#{task_id}` |
+| Check-in | `USER#{user_id}` | `CHECKIN#{date}#{id}` |
+| Blocker | `TASK#{task_id}` | `BLOCKER#{blocker_id}` |
+| Velocity | `PROJECT#{project_id}` | `VELOCITY#{cycle_id}` |
+| Pattern | `USER#{user_id}` | `PATTERN#AGGREGATE` |
+| SMS Consent | `USER#{user_id}` | `CONSENT#SMS` |
+| Rate limit | `USER#{user_id}` | `RATELIMIT#{YYYY-MM-DD}` |
+| Blocked log | `USER#{user_id}` | `BLOCKED#{iso_timestamp}` |
+
+---
+
+### Git / repo
+
+| Item | Status |
+|---|---|
+| Initial commit | ✅ Made (f6a31fb) — 32 files, 3280 insertions |
+| Pushed to GitHub | ❌ Not yet — push with `git push -u origin main` |
+| `.env` / `terraform.tfvars` committed | ✅ Correctly gitignored |
+| `plan.md` | ✅ Gitignored (local planning file) |
+| Local dev files (`chat.py`, `local_server.py`, `requirement-dev.txt`) | ✅ Gitignored |
 
 ---
 
@@ -159,12 +187,11 @@ decorators on `handler()`. No `print()`.
 
 | File | Status |
 |---|---|
-| `privacy-policy.md` | ✅ Written — needs [YOUR EMAIL], [YOUR WEBSITE URL], [YOUR STATE] filled in |
+| `privacy-policy.md` | ✅ Written — needs `[YOUR EMAIL]`, `[YOUR WEBSITE URL]`, `[YOUR STATE]` filled in |
 | `terms-of-service.md` | ✅ Written — same placeholders |
 
-Both cover SMS opt-in/out, data storage (AWS DynamoDB), Twilio + Anthropic as
-processors, TCPA language, no data selling. Need to be published to a live URL
-before Twilio A2P review can complete.
+Both cover SMS opt-in/out, DynamoDB storage, Twilio + Anthropic as processors, TCPA language.
+Must be published to a live URL before Twilio A2P review can complete.
 
 ---
 
@@ -173,113 +200,43 @@ before Twilio A2P review can complete.
 | Item | Status |
 |---|---|
 | A2P 10DLC Campaign registration | 🔄 In review (1–3 business days) |
-| Toll-free number purchased | ❓ Confirm |
+| A2P 10DLC phone number | ❓ Confirm purchased |
 | Webhook URL set in Twilio console | ❌ Not yet — needs deploy first |
-| Opt-in consent flow in code | ❌ Not implemented — Sprint 2 |
+| Opt-in consent flow in code | ✅ Implemented in `sms/handler.py` |
 
 ---
 
-## What Is NOT Built Yet (Sprint 2)
+## Ordered Next Steps
 
-### 1. Real agent logic in Lambda handlers — the big one
-
-All three handlers return stubs. None of them call the Strands agent yet.
-
-**`functions/agent/handler.py`** needs:
-- Parse `user_id`, `type`, `message`, `history` from request body
-- Cap history at 20 turns before passing to agent
-- Instantiate `Agent(model=AnthropicModel(...), tools=[...all 10...], system_prompt=STRIDE_SYSTEM_PROMPT)`
-- Run agent with message + history
-- Return `{"reply": str, "history": updated_list}`
-
-**`functions/checkin/handler.py`** needs:
-- Parse `user_id`, `project_id`, `did`, `doing`, `blocked` from body
-- Call `create_checkin` tool directly
-- If `blocked` is non-empty, call `flag_blocker` for the relevant task
-- Return real `checkin_id`
-
-**`functions/sms/handler.py`** needs:
-- After guards pass, look up or create user record
-- Check opt-in consent status
-- Route to agent with `type="checkin"` or detect session type from message
-- Return real agent reply via TwiML
-
----
-
-### 2. SMS opt-in consent flow (TCPA — legally required)
-
-Before any SMS can be sent to beta users:
-
-**New DynamoDB record needed:**
-
-| Entity | PK | SK |
+| # | Task | Effort |
 |---|---|---|
-| Consent | `USER#{user_id}` | `CONSENT#PHONE` |
-
-**Flow:**
-1. User texts any message for the first time
-2. Check for `CONSENT#PHONE` record — if missing, send opt-in prompt
-3. `"Reply YES to receive Stride daily check-ins. Reply STOP anytime."`
-4. If reply is "YES" → write `CONSENT#PHONE` with timestamp
-5. All subsequent messages proceed normally
-6. "STOP" → delete/flag consent record, send confirmation, stop all messages
-
-This needs a new tool `check_consent(user_id)` and `record_consent(user_id, phone)`.
+| 1 | **Push to GitHub** — `git push -u origin main` | 2 min |
+| 2 | **Bootstrap Terraform state** — `cd scrumbot-infra/bootstrap && terraform init && terraform apply` | 5 min |
+| 3 | **Create `terraform.tfvars`** — copy from example, fill in 4 secrets | 5 min |
+| 4 | **Deploy** — `cd scrumbot-infra && terraform init && terraform apply` | 10 min |
+| 5 | **Set Twilio webhook** — paste `{api_gateway_url}/sms` into Twilio Console | 2 min |
+| 6 | **Smoke test** all 3 endpoints + real SMS round-trip | 15 min |
+| 7 | **Publish Privacy Policy + Terms** to live URL (Notion or GitHub Pages) | 15 min |
+| 8 | **Invite 10 beta users** after A2P approval + smoke tests pass | — |
 
 ---
 
-### 3. Velocity and pattern write-back
-
-Currently `get_pace_history` and `get_user_patterns` can read data, but nothing
-writes `Velocity` or `UserPattern` records after a cycle ends. These are needed
-for the weekly review session to cite real numbers.
-
-**Needs:**
-- `record_velocity(project_id, cycle_id, planned_points, delivered_points)` — new tool
-- `update_user_patterns(user_id, ...)` — new tool or inline logic after each review
-
----
-
-### 4. Terraform deployment
-
-Nothing is live yet. The full deploy sequence:
-
-```bash
-# 1. One-time bootstrap
-cd scrumbot-infra/bootstrap
-terraform init && terraform apply
-
-# 2. Create terraform.tfvars (never commit)
-cp scrumbot-infra/terraform.tfvars.example scrumbot-infra/terraform.tfvars
-# Fill in: anthropic_api_key, twilio_auth_token, twilio_account_sid, twilio_phone_number
-
-# 3. Deploy everything
-cd scrumbot-infra
-terraform init && terraform apply
-
-# 4. Get webhook URL
-terraform output api_gateway_url
-# → paste into Twilio console as webhook for POST /sms
-```
-
----
-
-### 5. Smoke tests (post-deploy)
+## Smoke test commands (post-deploy)
 
 ```bash
 API=$(terraform -chdir=scrumbot-infra output -raw api_gateway_url)
 
-# Check-in endpoint
+# Check-in
 curl -s -X POST $API/checkin \
   -H "Content-Type: application/json" \
-  -d '{"user_id":"u1","did":"built the tool layer","doing":"wiring the agent","blocked":""}' | jq .
+  -d '{"user_id":"u1","project_id":"p1","did":"wrote code","doing":"testing","blocked":""}' | jq .
 
-# Agent endpoint
+# Agent
 curl -s -X POST $API/ceremony \
   -H "Content-Type: application/json" \
-  -d '{"user_id":"u1","type":"setup","message":"I want to get set up","history":[]}' | jq .
+  -d '{"user_id":"u1","type":"setup","message":"I want to get started","history":[]}' | jq .
 
-# SMS: text your Twilio number and confirm reply in Messages app
+# SMS: text your Twilio number, confirm reply in Messages app
 
 # Tail logs
 aws logs tail /aws/lambda/stride-checkin --follow
@@ -289,41 +246,18 @@ aws logs tail /aws/lambda/stride-sms --follow
 
 ---
 
-### 6. User record creation
+## Definition of Done — Sprint 2 (pending deploy)
 
-There is a `User` model but no `create_user` tool and no onboarding flow that
-creates the initial `USER#{user_id}` / `#METADATA` record. First-time SMS users
-need to be bootstrapped into the system.
-
----
-
-## Ordered Next Steps
-
-| # | Task | Blocks | Effort |
-|---|---|---|---|
-| 1 | **Deploy Terraform** — create `terraform.tfvars`, bootstrap, apply | Smoke tests, Twilio webhook | 30 min |
-| 2 | **Set Twilio webhook URL** — paste `api_gateway_url/sms` into Twilio console | Live SMS | 5 min |
-| 3 | **Wire agent into `functions/agent/handler.py`** | Real ceremony responses | 2–3 hrs |
-| 4 | **Wire agent into `functions/checkin/handler.py`** | Real check-in saves | 1 hr |
-| 5 | **Build SMS opt-in consent flow** in `functions/sms/handler.py` | Legal SMS to beta users | 1–2 hrs |
-| 6 | **Create user record on first SMS** — `USER#{id}` / `#METADATA` write | Patterns, history | 30 min |
-| 7 | **Add `record_velocity` + `update_user_patterns` tools** | Weekly review with real numbers | 1–2 hrs |
-| 8 | **Smoke test all 3 endpoints** | Confidence to invite beta users | 30 min |
-| 9 | **Invite 10 beta users** | Dogfooding | — |
-| 10 | **Publish Privacy Policy + Terms** to a live URL | A2P approval | 15 min |
-
----
-
-## Definition of Done — Sprint 2
-
-- [ ] All 3 Lambda handlers return real responses (no stubs)
-- [ ] SMS opt-in consent flow enforced — no messages sent without YES reply
-- [ ] First-time user creates `USER#` record automatically
-- [ ] Weekly review cites real planned vs delivered numbers
-- [ ] `terraform apply` exits 0 and all resources are live in us-east-1
+- [x] All 3 Lambda handlers return real responses (no stubs)
+- [x] SMS opt-in consent flow enforced — no messages sent without YES reply
+- [x] First-time user creates `USER#` record automatically (`get_or_create_user`)
+- [x] Weekly review tools write real velocity + pattern data
+- [x] 13 tools in `shared/tools.py` — plain language names, no Scrum jargon
+- [ ] `terraform apply` exits 0 — all resources live in us-east-1
 - [ ] Smoke tests pass for all 3 endpoints
 - [ ] CloudWatch shows structured JSON logs (no print output)
 - [ ] X-Ray traces present for all 3 functions
-- [ ] 10 beta users receiving and replying to real Stride messages
-- [ ] Privacy Policy and Terms live at a public URL
+- [ ] Real SMS round-trip with opt-in flow works end-to-end
+- [ ] Privacy Policy + Terms live at a public URL
 - [ ] A2P Campaign fully approved
+- [ ] 10 beta users onboarded
