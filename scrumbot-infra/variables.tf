@@ -16,7 +16,7 @@ variable "twilio_account_sid" {
 }
 
 variable "twilio_phone_number" {
-  description = "Twilio toll-free phone number for outbound SMS (E.164 format, e.g. +18005551234)"
+  description = "Twilio 10DLC phone number for SMS (E.164 format, e.g. +14045551234)"
   type        = string
 }
 

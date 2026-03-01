@@ -32,7 +32,7 @@ def check_rate_limit(user_id: str, limit: int = 50) -> bool:
     Fails open on DynamoDB error — a DB outage must not block legitimate users.
 
     Args:
-        user_id: The user identifier (WhatsApp WaId).
+        user_id: The user identifier (E.164 phone number, e.g. +14155551234).
         limit:   Maximum messages allowed per calendar day (UTC). Defaults to 50.
 
     Returns:

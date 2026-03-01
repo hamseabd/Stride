@@ -26,7 +26,7 @@ def increment_rate_limit(user_id: str) -> int:
         SK: RATELIMIT#{YYYY-MM-DD}   (today's UTC date)
 
     Args:
-        user_id: The user identifier (WhatsApp WaId).
+        user_id: The user identifier (E.164 phone number, e.g. +14155551234).
 
     Returns:
         The new message count after increment.

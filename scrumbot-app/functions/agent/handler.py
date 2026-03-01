@@ -3,7 +3,6 @@ import json
 from aws_lambda_powertools import Logger, Tracer
 from aws_lambda_powertools.utilities.typing import LambdaContext
 from aws_lambda_powertools.event_handler import APIGatewayHttpResolver, Response
-from aws_lambda_powertools.event_handler.api_gateway import Router
 from strands import Agent
 from strands.models.anthropic import AnthropicModel
 
