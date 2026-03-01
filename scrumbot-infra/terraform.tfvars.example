@@ -1,0 +1,7 @@
+anthropic_api_key   = ""
+twilio_auth_token   = ""
+twilio_account_sid  = ""
+twilio_phone_number = ""
+environment         = "prod"
+aws_region          = "us-east-1"
+dynamodb_table_name = "stride-prod"

@@ -1,0 +1,69 @@
+name: Terraform
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "scrumbot-infra/**"
+      - "scrumbot-app/**"
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "scrumbot-infra/**"
+      - "scrumbot-app/**"
+
+permissions:
+  id-token: write   # required for OIDC
+  contents: read
+
+env:
+  TF_DIR: scrumbot-infra
+
+jobs:
+  terraform:
+    name: Terraform ${{ github.event_name == 'push' && 'Apply' || 'Plan' }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: us-east-1
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "~1.7"
+
+      - name: Terraform Format Check
+        run: terraform -chdir=$TF_DIR fmt -check -recursive
+
+      - name: Terraform Init
+        run: terraform -chdir=$TF_DIR init
+
+      - name: Terraform Validate
+        run: terraform -chdir=$TF_DIR validate
+
+      - name: Terraform Plan
+        if: github.event_name == 'pull_request'
+        run: |
+          terraform -chdir=$TF_DIR plan \
+            -var="anthropic_api_key=${{ secrets.ANTHROPIC_API_KEY }}" \
+            -var="twilio_auth_token=${{ secrets.TWILIO_AUTH_TOKEN }}" \
+            -var="twilio_account_sid=${{ secrets.TWILIO_ACCOUNT_SID }}" \
+            -var="twilio_phone_number=${{ secrets.TWILIO_PHONE_NUMBER }}"
+
+      - name: Terraform Apply
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          terraform -chdir=$TF_DIR apply -auto-approve \
+            -var="anthropic_api_key=${{ secrets.ANTHROPIC_API_KEY }}" \
+            -var="twilio_auth_token=${{ secrets.TWILIO_AUTH_TOKEN }}" \
+            -var="twilio_account_sid=${{ secrets.TWILIO_ACCOUNT_SID }}" \
+            -var="twilio_phone_number=${{ secrets.TWILIO_PHONE_NUMBER }}"

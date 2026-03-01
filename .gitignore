@@ -1,0 +1,55 @@
+# Environment
+.env
+.venv/
+*.env
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+*.pyd
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+*.eggs/
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test / coverage
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+
+# Terraform
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+terraform.tfvars
+terraform.tfvars.local
+override.tf
+override.tf.json
+crash.log
+.terraformrc
+terraform.rc
+
+scrumbot-app/chat.py
+scrumbot-app/local_server.py
+scrumbot-app/requirement-dev.txt
+plan.md
