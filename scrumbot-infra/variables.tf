@@ -37,3 +37,9 @@ variable "dynamodb_table_name" {
   type        = string
   default     = "stride-prod"
 }
+
+variable "image_tag" {
+  description = "Docker image tag to deploy. Use git SHA in CI, 'latest' locally."
+  type        = string
+  default     = "latest"
+}

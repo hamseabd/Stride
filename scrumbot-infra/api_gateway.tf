@@ -5,7 +5,8 @@ module "api_gateway" {
   name          = "stride-api"
   protocol_type = "HTTP"
 
-  create_default_stage = true
+  create_domain_name = false
+  create_certificate = false
 
   routes = {
     "POST /checkin" = {

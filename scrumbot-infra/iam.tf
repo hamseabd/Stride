@@ -47,6 +47,36 @@ resource "aws_iam_role_policy" "dynamodb" {
   policy = data.aws_iam_policy_document.dynamodb.json
 }
 
+# ---------------------------------------------------------------------------
+# ECR push policy — attach to the GitHub Actions OIDC role
+# ---------------------------------------------------------------------------
+
+data "aws_iam_policy_document" "ecr_push" {
+  statement {
+    effect    = "Allow"
+    actions   = ["ecr:GetAuthorizationToken"]
+    resources = ["*"]
+  }
+  statement {
+    effect = "Allow"
+    actions = [
+      "ecr:BatchCheckLayerAvailability",
+      "ecr:GetDownloadUrlForLayer",
+      "ecr:BatchGetImage",
+      "ecr:PutImage",
+      "ecr:InitiateLayerUpload",
+      "ecr:UploadLayerPart",
+      "ecr:CompleteLayerUpload",
+    ]
+    resources = [for repo in aws_ecr_repository.stride : repo.arn]
+  }
+}
+
+resource "aws_iam_policy" "ecr_push" {
+  name   = "stride-ecr-push"
+  policy = data.aws_iam_policy_document.ecr_push.json
+}
+
 data "aws_iam_policy_document" "xray" {
   statement {
     effect = "Allow"

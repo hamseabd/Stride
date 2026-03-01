@@ -38,6 +38,7 @@ htmlcov/
 
 # Terraform
 **/.terraform/
+scrumbot-infra/builds/
 *.tfstate
 *.tfstate.*
 *.tfplan

@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+.env
+*.env
+.DS_Store
+chat.py
+local_server.py
+requirement-dev.txt
+tests/

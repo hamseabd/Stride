@@ -1,7 +1,4 @@
 locals {
-  app_dir    = "${path.module}/../scrumbot-app"
-  shared_dir = "${local.app_dir}/shared"
-
   common_env = {
     DYNAMODB_TABLE_NAME = var.dynamodb_table_name
     ENVIRONMENT         = var.environment
@@ -16,19 +13,11 @@ module "lambda_checkin" {
   source  = "terraform-aws-modules/lambda/aws"
   version = "~> 7.0"
 
-  function_name = "stride-checkin"
-  handler       = "handler.handler"
-  runtime       = "python3.12"
-  architectures = ["arm64"]
-
-  source_path = [
-    "${local.app_dir}/functions/checkin",
-    {
-      path             = local.shared_dir
-      prefix_in_zip    = "shared"
-      pip_requirements = false
-    },
-  ]
+  function_name  = "stride-checkin"
+  create_package = false
+  package_type   = "Image"
+  image_uri      = "${aws_ecr_repository.stride["stride-checkin"].repository_url}:${var.image_tag}"
+  architectures  = ["arm64"]
 
   create_role = false
   lambda_role = aws_iam_role.stride_lambda_exec.arn
@@ -54,19 +43,11 @@ module "lambda_agent" {
   source  = "terraform-aws-modules/lambda/aws"
   version = "~> 7.0"
 
-  function_name = "stride-agent"
-  handler       = "handler.handler"
-  runtime       = "python3.12"
-  architectures = ["arm64"]
-
-  source_path = [
-    "${local.app_dir}/functions/agent",
-    {
-      path             = local.shared_dir
-      prefix_in_zip    = "shared"
-      pip_requirements = false
-    },
-  ]
+  function_name  = "stride-agent"
+  create_package = false
+  package_type   = "Image"
+  image_uri      = "${aws_ecr_repository.stride["stride-agent"].repository_url}:${var.image_tag}"
+  architectures  = ["arm64"]
 
   create_role = false
   lambda_role = aws_iam_role.stride_lambda_exec.arn
@@ -93,19 +74,11 @@ module "lambda_sms" {
   source  = "terraform-aws-modules/lambda/aws"
   version = "~> 7.0"
 
-  function_name = "stride-sms"
-  handler       = "handler.handler"
-  runtime       = "python3.12"
-  architectures = ["arm64"]
-
-  source_path = [
-    "${local.app_dir}/functions/sms",
-    {
-      path             = local.shared_dir
-      prefix_in_zip    = "shared"
-      pip_requirements = false
-    },
-  ]
+  function_name  = "stride-sms"
+  create_package = false
+  package_type   = "Image"
+  image_uri      = "${aws_ecr_repository.stride["stride-sms"].repository_url}:${var.image_tag}"
+  architectures  = ["arm64"]
 
   create_role = false
   lambda_role = aws_iam_role.stride_lambda_exec.arn

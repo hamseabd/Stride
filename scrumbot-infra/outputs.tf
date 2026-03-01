@@ -22,3 +22,23 @@ output "dynamodb_table_name" {
   description = "Name of the DynamoDB table"
   value       = aws_dynamodb_table.stride.name
 }
+
+output "ecr_push_policy_arn" {
+  description = "ARN of the ECR push policy — attach to your GitHub Actions OIDC role"
+  value       = aws_iam_policy.ecr_push.arn
+}
+
+output "ecr_checkin_url" {
+  description = "ECR repository URL for stride-checkin"
+  value       = aws_ecr_repository.stride["stride-checkin"].repository_url
+}
+
+output "ecr_agent_url" {
+  description = "ECR repository URL for stride-agent"
+  value       = aws_ecr_repository.stride["stride-agent"].repository_url
+}
+
+output "ecr_sms_url" {
+  description = "ECR repository URL for stride-sms"
+  value       = aws_ecr_repository.stride["stride-sms"].repository_url
+}

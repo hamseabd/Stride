@@ -4,3 +4,4 @@ boto3==1.38.0
 aws-lambda-powertools==3.7.0
 python-dotenv==1.0.1
 twilio==9.4.0
+aws-xray-sdk==2.15.0
