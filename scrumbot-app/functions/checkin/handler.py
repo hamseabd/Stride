@@ -67,6 +67,7 @@ def checkin():
             blocker_result = flag_blocker(
                 task_id=in_progress[0]["task_id"],
                 description=blocked,
+                category="capacity",
             )
             if "error" in blocker_result:
                 logger.warning(

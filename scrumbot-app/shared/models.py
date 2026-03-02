@@ -18,6 +18,10 @@ class User(BaseModel):
     phone: str = ""
     onboarded: bool = False
     created_at: str = Field(default_factory=_now)
+    timezone: str = "America/New_York"
+    checkin_time: str = "09:00"
+    evening_time: str = "18:00"
+    planning_day: int = 1  # 1=Monday, 7=Sunday
 
 
 class Project(BaseModel):
@@ -25,6 +29,7 @@ class Project(BaseModel):
     user_id: str
     name: str = ""
     description: str = ""
+    target_date: str = ""  # YYYY-MM-DD — when user wants to achieve this goal
     created_at: str = Field(default_factory=_now)
 
 
@@ -49,6 +54,7 @@ class Task(BaseModel):
     status: str = "todo"
     created_at: str = Field(default_factory=_now)
     updated_at: str = Field(default_factory=_now)
+    status_changed_at: str = Field(default_factory=_now)
 
 
 class Checkin(BaseModel):
@@ -66,6 +72,7 @@ class Blocker(BaseModel):
     task_id: str
     description: str
     resolved: bool = False
+    category: str = ""  # external | scope | capacity | process
     created_at: str = Field(default_factory=_now)
 
 
@@ -75,6 +82,7 @@ class Velocity(BaseModel):
     planned_points: int = 0
     delivered_points: int = 0
     cycle_name: str = ""
+    active_project_count: int = 0
     recorded_at: str = Field(default_factory=_now)
 
 
@@ -84,4 +92,17 @@ class UserPattern(BaseModel):
     avg_completion_rate: float = 0.0  # avg delivered/planned ratio
     common_blockers: list = Field(default_factory=list)
     cycle_count: int = 0
+    preferred_tone: str = "balanced"  # direct | encouraging | balanced
     updated_at: str = Field(default_factory=_now)
+
+
+class Habit(BaseModel):
+    habit_id: str = Field(default_factory=_uuid)
+    user_id: str
+    title: str
+    frequency: str = "daily"  # daily | weekdays | 3x_week | weekly
+    current_streak: int = 0
+    longest_streak: int = 0
+    last_completed: str = ""  # YYYY-MM-DD
+    active: bool = True
+    created_at: str = Field(default_factory=_now)

@@ -15,12 +15,15 @@ from shared.db import (
     log_blocked_attempt,
     get_consent, record_consent, revoke_consent,
     get_or_create_user,
+    get_conversation, save_conversation,
 )
 from shared.tools import (
-    create_project, create_work_cycle, list_active_projects,
+    create_project, update_project, create_work_cycle, list_active_projects,
     create_task, update_task_status, get_cycle_data,
     create_checkin, flag_blocker, get_pace_history, get_user_patterns,
     record_velocity, update_user_patterns, complete_onboarding,
+    set_user_preference,
+    create_habit, complete_habit, list_habits,
 )
 
 logger = Logger()
@@ -31,10 +34,12 @@ SMS_MAX_CHARS = 1600   # Twilio hard limit
 SMS_TARGET_CHARS = 300 # soft target — keep responses short
 
 TOOLS = [
-    create_project, create_work_cycle, list_active_projects,
+    create_project, update_project, create_work_cycle, list_active_projects,
     create_task, update_task_status, get_cycle_data,
     create_checkin, flag_blocker, get_pace_history, get_user_patterns,
     record_velocity, update_user_patterns, complete_onboarding,
+    set_user_preference,
+    create_habit, complete_habit, list_habits,
 ]
 
 _OPT_IN_PROMPT = (
@@ -72,10 +77,39 @@ You are responding via SMS. Additional rules:
 
 _ONBOARDING_ADDENDUM = """
 This is a new user — they have no projects yet.
-Start with setup: ask what they are working on.
-Once they tell you, create their first project, first work cycle covering
-this week, and their initial tasks. After creating at least one task,
-call complete_onboarding to mark them as set up.
+Start with setup: ask what they want to achieve (their goal).
+Ask for a target date: "When do you want this done by?"
+Create their first project with the target_date, suggest milestones,
+create a first work cycle covering this week, and their initial tasks.
+After creating at least one task, ask if they have any daily practices
+they want to maintain (habits like writing, exercise, reading).
+If yes, use create_habit. If no, that's fine.
+Then call complete_onboarding to mark them as set up.
+"""
+
+_CAPACITY_LANGUAGE_ADDENDUM = """
+CRITICAL — how you talk about workload:
+- Never say "points", "pts", "story points", or any numbers-based estimate system.
+- Translate estimates to time: S = "a few hours", M = "a day or two", L = "most of the week", XL = "more than a week — that's risky, let's break it down."
+- Talk about capacity in days: "You get about 3 good days of work done per week" (not "15 points").
+- When a user is over-planned: "That's 5 days of work for a 3-day capacity. What can wait?"
+- The point system exists internally for tracking. Users must NEVER see it.
+
+GOAL DECOMPOSITION — how goals work:
+- Users state big goals with timelines: "Launch portfolio in 3 months"
+- Projects = Goals. Each project has a target_date.
+- Work cycles = Milestones within a goal. Each cycle has a goal field describing the milestone.
+- Tasks = weekly work within a milestone.
+- YOU lead the breakdown: suggest milestones, suggest weekly tasks. User confirms or adjusts.
+- During Monday planning, reference the big goal + current milestone.
+- When creating a project, ALWAYS ask for a target date: "When do you want this done by?"
+
+HABITS — separate from goals:
+- Habits are recurring tasks the user wants to maintain (e.g. "Write 30 min daily", "Exercise 3x/week").
+- Use create_habit for recurring practices, NOT create_task.
+- Habits have streaks. Celebrate streaks: "5 days in a row writing — nice!"
+- In morning messages, list both today's tasks AND habits.
+- If a habit streak breaks, be encouraging not guilt-tripping: "Missed yesterday — want to get back to it today?"
 """
 
 
@@ -121,19 +155,31 @@ def _twiml(text: str) -> dict:
     }
 
 
-def _call_agent(user_id: str, message: str, is_new_user: bool) -> str:
+def _call_agent(user_id: str, message: str, is_new_user: bool, user: dict) -> str:
     """Run the Stride agent for an SMS message. Returns the reply string."""
+    tone = user.get("preferred_tone", "balanced")
+    tz = user.get("timezone", "America/New_York")
+    planning_day = int(user.get("planning_day", 1))
+
     system = (
         STRIDE_SYSTEM_PROMPT.strip()
         + f"\n\nCurrent user_id: {user_id}"
+        + f"\nUser's timezone: {tz}"
+        + f"\nThis user responds best to a {tone} coaching style."
+        + _CAPACITY_LANGUAGE_ADDENDUM
         + _SMS_SYSTEM_ADDENDUM
     )
     if is_new_user:
         system += _ONBOARDING_ADDENDUM
 
-    model = AnthropicModel(model_id="claude-sonnet-4-6", max_tokens=512)
-    agent = Agent(model=model, system_prompt=system, tools=TOOLS, messages=[])
+    history = get_conversation(user_id)
+
+    model = AnthropicModel(model_id="claude-sonnet-4-6", max_tokens=1024)
+    agent = Agent(model=model, system_prompt=system, tools=TOOLS, messages=history)
     result = agent(message)
+
+    save_conversation(user_id, agent.messages, planning_day=planning_day, user_timezone=tz)
+
     return str(result)
 
 
@@ -229,7 +275,7 @@ def sms():
 
     # 10. Stride agent
     try:
-        reply = _call_agent(user_id=user_id, message=message, is_new_user=is_new_user)
+        reply = _call_agent(user_id=user_id, message=message, is_new_user=is_new_user, user=user)
         return _twiml(reply)
     except Exception as e:
         logger.exception("SMS agent call failed", user_id=user_id)

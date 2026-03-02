@@ -8,10 +8,12 @@ from strands.models.anthropic import AnthropicModel
 
 from shared.prompt import STRIDE_SYSTEM_PROMPT
 from shared.tools import (
-    create_project, create_work_cycle, list_active_projects,
+    create_project, update_project, create_work_cycle, list_active_projects,
     create_task, update_task_status, get_cycle_data,
     create_checkin, flag_blocker, get_pace_history, get_user_patterns,
     record_velocity, update_user_patterns, complete_onboarding,
+    set_user_preference,
+    create_habit, complete_habit, list_habits,
 )
 
 logger = Logger()
@@ -21,10 +23,12 @@ app = APIGatewayHttpResolver()
 MAX_HISTORY_TURNS = 20
 
 TOOLS = [
-    create_project, create_work_cycle, list_active_projects,
+    create_project, update_project, create_work_cycle, list_active_projects,
     create_task, update_task_status, get_cycle_data,
     create_checkin, flag_blocker, get_pace_history, get_user_patterns,
     record_velocity, update_user_patterns, complete_onboarding,
+    set_user_preference,
+    create_habit, complete_habit, list_habits,
 ]
 
 

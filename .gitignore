@@ -50,7 +50,6 @@ crash.log
 .terraformrc
 terraform.rc
 
-scrumbot-app/chat.py
 scrumbot-app/local_server.py
 scrumbot-app/requirement-dev.txt
 plan.md

@@ -1,5 +1,7 @@
+import json
 import os
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 
 import boto3
 from aws_lambda_powertools import Logger
@@ -207,3 +209,114 @@ def log_blocked_attempt(user_id: str, reason: str, message_preview: str) -> None
             user_id=user_id,
             reason=reason,
         )
+
+
+# ---------------------------------------------------------------------------
+# Conversation history
+# ---------------------------------------------------------------------------
+
+def get_conversation(user_id: str) -> list:
+    """
+    Load the current conversation history for a user.
+    Returns the stored messages list, or empty list if none exists.
+
+    Weekly reset: if today is the user's planning day and we haven't
+    reset yet today, clear the history (fresh start for the week).
+
+    Returns empty list on error (fail open).
+    """
+    try:
+        resp = get_table().get_item(
+            Key={"pk": f"USER#{user_id}", "sk": "CONVERSATION#CURRENT"}
+        )
+        item = resp.get("Item")
+        if not item:
+            return []
+
+        planning_day = int(item.get("planning_day", 1))
+        user_tz_str = item.get("user_timezone", "America/New_York")
+        try:
+            user_tz = ZoneInfo(user_tz_str)
+        except Exception:
+            user_tz = ZoneInfo("America/New_York")
+
+        last_reset = item.get("last_reset_date", "")
+        now_local = datetime.now(user_tz)
+        today = now_local.strftime("%Y-%m-%d")
+        weekday = now_local.isoweekday()  # 1=Monday, 7=Sunday
+
+        if weekday == planning_day and last_reset != today:
+            logger.info("Weekly conversation reset", user_id=user_id)
+            get_table().update_item(
+                Key={"pk": f"USER#{user_id}", "sk": "CONVERSATION#CURRENT"},
+                UpdateExpression="SET messages = :empty, last_reset_date = :today",
+                ExpressionAttributeValues={":empty": "[]", ":today": today},
+            )
+            return []
+
+        messages_json = item.get("messages", "[]")
+        return json.loads(messages_json) if isinstance(messages_json, str) else messages_json
+    except Exception as e:
+        logger.error("get_conversation failed — returning empty", error=str(e), user_id=user_id)
+        return []
+
+
+def save_conversation(user_id: str, messages: list, planning_day: int = 1, user_timezone: str = "America/New_York") -> bool:
+    """
+    Write updated conversation history, capped at 20 turns.
+    Strips tool call/result payloads to stay under DynamoDB's 400KB item limit.
+    Includes byte-size safety check — trims further if JSON exceeds 350KB.
+
+    Returns True on success, False on error.
+    """
+    try:
+        stripped = []
+        for msg in messages:
+            if isinstance(msg, dict):
+                role = msg.get("role", "")
+                if role == "user":
+                    content = msg.get("content", [])
+                    if isinstance(content, list) and all(
+                        isinstance(c, dict) and c.get("type") == "toolResult" for c in content
+                    ):
+                        continue
+                    stripped.append(msg)
+                elif role == "assistant":
+                    content = msg.get("content", [])
+                    if isinstance(content, list):
+                        text_only = [c for c in content if isinstance(c, dict) and c.get("type") != "toolUse"]
+                        if text_only:
+                            stripped.append({"role": "assistant", "content": text_only})
+                    elif isinstance(content, str):
+                        stripped.append(msg)
+
+        if len(stripped) > 20:
+            stripped = stripped[-20:]
+
+        messages_json = json.dumps(stripped)
+        while len(messages_json.encode("utf-8")) > 350_000 and len(stripped) > 2:
+            stripped = stripped[2:]
+            messages_json = json.dumps(stripped)
+
+        now = datetime.now(timezone.utc).isoformat() + "Z"
+        try:
+            user_tz = ZoneInfo(user_timezone)
+        except Exception:
+            user_tz = ZoneInfo("America/New_York")
+        now_local = datetime.now(user_tz)
+        today = now_local.strftime("%Y-%m-%d")
+
+        get_table().put_item(Item={
+            "pk": f"USER#{user_id}",
+            "sk": "CONVERSATION#CURRENT",
+            "messages": messages_json,
+            "turn_count": len(stripped),
+            "planning_day": planning_day,
+            "user_timezone": user_timezone,
+            "last_reset_date": today if now_local.isoweekday() == planning_day else "",
+            "updated_at": now,
+        })
+        return True
+    except Exception as e:
+        logger.error("save_conversation failed", error=str(e), user_id=user_id)
+        return False

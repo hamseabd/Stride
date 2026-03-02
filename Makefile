@@ -1,4 +1,4 @@
-.PHONY: up down build push deploy logs-checkin logs-agent logs-sms
+.PHONY: up down build push deploy test chat logs-checkin logs-agent logs-sms
 
 # ── Local development ──────────────────────────────────────────────────────
 up:
@@ -6,6 +6,12 @@ up:
 
 down:
 	docker compose down -v
+
+test:
+	cd scrumbot-app && .venv/bin/python -m pytest tests/ -v
+
+chat:
+	cd scrumbot-app && PYTHONPATH=. .venv/bin/python chat.py
 
 # ── Build + push images ─────────────────────────────────────────────────────
 build:
