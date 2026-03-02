@@ -1,4 +1,3 @@
-import os
 from datetime import datetime
 from decimal import Decimal
 
@@ -7,12 +6,13 @@ from strands import tool
 from aws_lambda_powertools import Logger
 
 from shared.db import get_table, set_onboarded
-from shared.models import Project, WorkCycle, Task, Checkin, Blocker, Velocity, UserPattern
+from shared.models import Project, WorkCycle, Task, Checkin, Blocker, Velocity, UserPattern, Habit
 
 logger = Logger()
 
 VALID_ESTIMATES = {"S": 2, "M": 5, "L": 8, "XL": 13}
 VALID_STATUSES = {"todo", "in_progress", "done", "blocked"}
+VALID_PREFERENCES = {"timezone", "checkin_time", "evening_time", "planning_day"}
 
 
 # ---------------------------------------------------------------------------
@@ -20,26 +20,34 @@ VALID_STATUSES = {"todo", "in_progress", "done", "blocked"}
 # ---------------------------------------------------------------------------
 
 @tool
-def create_project(user_id: str, name: str, description: str) -> dict:
+def create_project(user_id: str, name: str, description: str, target_date: str = "") -> dict:
     """
-    Create a new project for a user and persist it to DynamoDB.
+    Create a new project (goal) for a user and persist it to DynamoDB.
 
     Params:
-      user_id: The user UUID who owns this project (required).
-      name: Short project name (required).
+      user_id: The user who owns this project (required).
+      name: Short project name — this is the user's goal (required).
       description: What the project is about (optional, can be empty).
+      target_date: When the user wants to achieve this goal, in YYYY-MM-DD format.
+                   Empty string if the goal is ongoing with no deadline.
 
     Returns on success:
-      {"project_id": str, "name": str, "created_at": str}
+      {"project_id": str, "name": str, "target_date": str, "created_at": str}
 
     Returns on error:
-      {"error": str}  — e.g. if user_id or name is missing.
+      {"error": str}
     """
     try:
         if not user_id or not name:
             return {"error": "user_id and name are required"}
 
-        project = Project(user_id=user_id, name=name, description=description)
+        if target_date:
+            try:
+                datetime.strptime(target_date, "%Y-%m-%d")
+            except ValueError:
+                return {"error": f"target_date must be YYYY-MM-DD format, got: {target_date}"}
+
+        project = Project(user_id=user_id, name=name, description=description, target_date=target_date)
         item = project.model_dump()
         item["pk"] = f"USER#{user_id}"
         item["sk"] = f"PROJECT#{project.project_id}"
@@ -49,9 +57,86 @@ def create_project(user_id: str, name: str, description: str) -> dict:
         table = get_table()
         table.put_item(Item=item)
         logger.info("Project created", project_id=project.project_id, user_id=user_id)
-        return {"project_id": project.project_id, "name": project.name, "created_at": project.created_at}
+        return {"project_id": project.project_id, "name": project.name, "target_date": project.target_date, "created_at": project.created_at}
     except Exception as e:
         logger.exception("create_project failed")
+        return {"error": str(e)}
+
+
+@tool
+def update_project(project_id: str, name: str = "", description: str = "", target_date: str = "") -> dict:
+    """
+    Update an existing project's name, description, or target date.
+    Only non-empty fields are updated — pass empty string to leave a field unchanged.
+
+    Params:
+      project_id: The project UUID to update (required).
+      name: New project name (empty string = no change).
+      description: New description (empty string = no change).
+      target_date: New target date in YYYY-MM-DD format (empty string = no change).
+
+    Returns on success:
+      {"project_id": str, "updated_fields": list}
+
+    Returns on error:
+      {"error": str}
+    """
+    try:
+        if not project_id:
+            return {"error": "project_id is required"}
+
+        if target_date:
+            try:
+                datetime.strptime(target_date, "%Y-%m-%d")
+            except ValueError:
+                return {"error": f"target_date must be YYYY-MM-DD format, got: {target_date}"}
+
+        table = get_table()
+
+        resp = table.query(
+            IndexName="gsi1",
+            KeyConditionExpression=Key("gsi1pk").eq(f"PROJECT#{project_id}") & Key("gsi1sk").eq("#METADATA"),
+        )
+        items = resp.get("Items", [])
+        if not items:
+            return {"error": f"Project {project_id} not found"}
+
+        item = items[0]
+        pk = item["pk"]
+        sk = item["sk"]
+
+        updates = []
+        names = {}
+        values = {}
+        updated_fields = []
+
+        if name:
+            updates.append("#n = :name")
+            names["#n"] = "name"
+            values[":name"] = name
+            updated_fields.append("name")
+        if description:
+            updates.append("description = :desc")
+            values[":desc"] = description
+            updated_fields.append("description")
+        if target_date:
+            updates.append("target_date = :td")
+            values[":td"] = target_date
+            updated_fields.append("target_date")
+
+        if not updates:
+            return {"error": "No fields to update — pass at least one of: name, description, target_date"}
+
+        expr = "SET " + ", ".join(updates)
+        kwargs = {"Key": {"pk": pk, "sk": sk}, "UpdateExpression": expr, "ExpressionAttributeValues": values}
+        if names:
+            kwargs["ExpressionAttributeNames"] = names
+
+        table.update_item(**kwargs)
+        logger.info("Project updated", project_id=project_id, fields=updated_fields)
+        return {"project_id": project_id, "updated_fields": updated_fields}
+    except Exception as e:
+        logger.exception("update_project failed")
         return {"error": str(e)}
 
 
@@ -132,7 +217,7 @@ def list_active_projects(user_id: str) -> dict:
       user_id: The user UUID to look up.
 
     Returns on success:
-      {"projects": [{"project_id": str, "name": str, "description": str, "active_cycle": dict | null}]}
+      {"projects": [{"project_id": str, "name": str, "description": str, "target_date": str, "active_cycle": dict | null}]}
       An empty list is a valid success response — it means the user has no projects yet.
 
     Returns on error:
@@ -171,6 +256,7 @@ def list_active_projects(user_id: str) -> dict:
                 "project_id": project_id,
                 "name": p.get("name", ""),
                 "description": p.get("description", ""),
+                "target_date": p.get("target_date", ""),
                 "active_cycle": active_cycle,
             })
 
@@ -275,12 +361,13 @@ def update_task_status(task_id: str, status: str) -> dict:
 
         table.update_item(
             Key={"pk": pk, "sk": sk},
-            UpdateExpression="SET #s = :status, gsi1sk = :gsi1sk, updated_at = :updated_at",
+            UpdateExpression="SET #s = :status, gsi1sk = :gsi1sk, updated_at = :updated_at, status_changed_at = :sca",
             ExpressionAttributeNames={"#s": "status"},
             ExpressionAttributeValues={
                 ":status": status,
                 ":gsi1sk": f"STATUS#{status}",
                 ":updated_at": updated_at,
+                ":sca": updated_at,
             },
         )
         logger.info("Task status updated", task_id=task_id, status=status)
@@ -376,22 +463,31 @@ def create_checkin(user_id: str, did: str, doing: str, blocked: str) -> dict:
 
 
 @tool
-def flag_blocker(task_id: str, description: str) -> dict:
+def flag_blocker(task_id: str, description: str, category: str) -> dict:
     """
     Flag a blocker for a given task and persist it to DynamoDB.
 
     Params:
       task_id: The task UUID that is blocked.
       description: What is blocking progress.
+      category: Blocker category. Must be one of: external, scope, capacity, process.
+                Use "external" for dependencies on other people or services,
+                "scope" for the task being bigger than expected,
+                "capacity" for not having enough time,
+                "process" for workflow or tooling issues.
 
     Returns on success:
-      {"blocker_id": str, "task_id": str, "created_at": str}
+      {"blocker_id": str, "task_id": str, "category": str, "created_at": str}
 
     Returns on error:
       {"error": str}
     """
     try:
-        blocker = Blocker(task_id=task_id, description=description)
+        valid_categories = {"external", "scope", "capacity", "process"}
+        if category not in valid_categories:
+            return {"error": f"Invalid category '{category}'. Must be one of: {sorted(valid_categories)}"}
+
+        blocker = Blocker(task_id=task_id, description=description, category=category)
         item = blocker.model_dump()
         item["pk"] = f"TASK#{task_id}"
         item["sk"] = f"BLOCKER#{blocker.blocker_id}"
@@ -399,7 +495,7 @@ def flag_blocker(task_id: str, description: str) -> dict:
         table = get_table()
         table.put_item(Item=item)
         logger.info("Blocker flagged", blocker_id=blocker.blocker_id, task_id=task_id)
-        return {"blocker_id": blocker.blocker_id, "task_id": task_id, "created_at": blocker.created_at}
+        return {"blocker_id": blocker.blocker_id, "task_id": task_id, "category": blocker.category, "created_at": blocker.created_at}
     except Exception as e:
         logger.exception("flag_blocker failed")
         return {"error": str(e)}
@@ -512,18 +608,35 @@ def record_velocity(
         if planned_points < 0 or delivered_points < 0:
             return {"error": "points must be non-negative"}
 
+        table = get_table()
+
+        # Compute active project count for context-switching data
+        project_resp = table.query(
+            IndexName="gsi1",
+            KeyConditionExpression=Key("gsi1pk").eq(f"PROJECT#{project_id}") & Key("gsi1sk").eq("#METADATA"),
+        )
+        project_item = project_resp.get("Items", [{}])[0]
+        owner_id = project_item.get("user_id", "")
+        active_count = 0
+        if owner_id:
+            proj_resp = table.query(
+                KeyConditionExpression=Key("pk").eq(f"USER#{owner_id}") & Key("sk").begins_with("PROJECT#"),
+            )
+            active_count = len(proj_resp.get("Items", []))
+
         velocity = Velocity(
             project_id=project_id,
             cycle_id=cycle_id,
             planned_points=planned_points,
             delivered_points=delivered_points,
             cycle_name=cycle_name,
+            active_project_count=active_count,
         )
         item = velocity.model_dump()
         item["pk"] = f"PROJECT#{project_id}"
         item["sk"] = f"VELOCITY#{cycle_id}"
 
-        get_table().put_item(Item=item)
+        table.put_item(Item=item)
         logger.info("Velocity recorded", project_id=project_id, cycle_id=cycle_id)
         return {
             "project_id": project_id,
@@ -689,4 +802,286 @@ def get_user_patterns(user_id: str) -> dict:
             }
     except Exception as e:
         logger.exception("get_user_patterns failed")
+        return {"error": str(e)}
+
+
+# ---------------------------------------------------------------------------
+# User preferences
+# ---------------------------------------------------------------------------
+
+@tool
+def set_user_preference(user_id: str, preference: str, value: str) -> dict:
+    """
+    Update a user preference. Call this when a user expresses a preference
+    like "I'm in California" or "I prefer evening check-ins."
+
+    Params:
+      user_id: The user whose preference to update.
+      preference: Must be one of: timezone, checkin_time, evening_time, planning_day.
+      value: The new value. Format depends on preference:
+        - timezone: IANA timezone string (e.g. "America/Los_Angeles")
+        - checkin_time: HH:MM in 24h format (e.g. "09:00")
+        - evening_time: HH:MM in 24h format (e.g. "18:00")
+        - planning_day: integer 1-7 where 1=Monday, 7=Sunday
+
+    Returns on success:
+      {"user_id": str, "preference": str, "value": str, "updated": true}
+
+    Returns on error:
+      {"error": str}
+    """
+    try:
+        if preference not in VALID_PREFERENCES:
+            return {"error": f"Invalid preference '{preference}'. Must be one of: {sorted(VALID_PREFERENCES)}"}
+
+        if preference in ("checkin_time", "evening_time"):
+            try:
+                h, m = value.split(":")
+                if not (0 <= int(h) <= 23 and 0 <= int(m) <= 59):
+                    raise ValueError
+            except (ValueError, AttributeError):
+                return {"error": f"{preference} must be HH:MM format (e.g. '09:00'), got: {value}"}
+
+        if preference == "planning_day":
+            try:
+                day = int(value)
+                if not 1 <= day <= 7:
+                    raise ValueError
+                value = day
+            except (ValueError, TypeError):
+                return {"error": f"planning_day must be 1-7 (1=Monday), got: {value}"}
+
+        table = get_table()
+        table.update_item(
+            Key={"pk": f"USER#{user_id}", "sk": "#METADATA"},
+            UpdateExpression="SET #pref = :val",
+            ExpressionAttributeNames={"#pref": preference},
+            ExpressionAttributeValues={":val": value},
+        )
+        logger.info("User preference updated", user_id=user_id, preference=preference)
+        return {"user_id": user_id, "preference": preference, "value": str(value), "updated": True}
+    except Exception as e:
+        logger.exception("set_user_preference failed")
+        return {"error": str(e)}
+
+
+# ---------------------------------------------------------------------------
+# Habits
+# ---------------------------------------------------------------------------
+
+VALID_FREQUENCIES = {"daily", "weekdays", "3x_week", "weekly"}
+
+
+def _is_streak_alive(last_completed: str, today_str: str, frequency: str) -> bool:
+    """Check if a habit's streak is still alive based on its frequency."""
+    if not last_completed:
+        return False
+    today = datetime.strptime(today_str, "%Y-%m-%d")
+    last = datetime.strptime(last_completed, "%Y-%m-%d")
+    gap = (today - last).days
+
+    if frequency == "daily":
+        return gap == 1
+    elif frequency == "weekdays":
+        if gap == 1:
+            return True
+        if gap == 3 and last.isoweekday() == 5:  # Friday → Monday
+            return True
+        return False
+    elif frequency == "weekly":
+        return gap <= 7
+    elif frequency == "3x_week":
+        return gap <= 7
+    return gap == 1
+
+
+@tool
+def create_habit(user_id: str, title: str, frequency: str) -> dict:
+    """
+    Create a recurring habit for a user. Habits are separate from goals — they represent
+    ongoing practices the user wants to maintain (e.g. "Write 30 min", "Exercise").
+
+    Params:
+      user_id: The user who owns this habit.
+      title: Short habit name (e.g. "Write 30 minutes", "Exercise").
+      frequency: How often. Must be one of: daily, weekdays, 3x_week, weekly.
+
+    Returns on success:
+      {"habit_id": str, "title": str, "frequency": str, "created_at": str}
+
+    Returns on error:
+      {"error": str}
+    """
+    try:
+        if frequency not in VALID_FREQUENCIES:
+            return {"error": f"Invalid frequency '{frequency}'. Must be one of: {sorted(VALID_FREQUENCIES)}"}
+
+        habit = Habit(user_id=user_id, title=title, frequency=frequency)
+        item = habit.model_dump()
+        item["pk"] = f"USER#{user_id}"
+        item["sk"] = f"HABIT#{habit.habit_id}"
+        item["gsi1pk"] = f"HABIT#{habit.habit_id}"
+        item["gsi1sk"] = "#METADATA"
+
+        get_table().put_item(Item=item)
+        logger.info("Habit created", habit_id=habit.habit_id, user_id=user_id)
+        return {"habit_id": habit.habit_id, "title": habit.title, "frequency": habit.frequency, "created_at": habit.created_at}
+    except Exception as e:
+        logger.exception("create_habit failed")
+        return {"error": str(e)}
+
+
+@tool
+def complete_habit(user_id: str, habit_id: str) -> dict:
+    """
+    Mark a habit as completed for today. Updates the streak counter.
+    Streak logic is frequency-aware:
+      - daily: consecutive calendar days
+      - weekdays: consecutive weekdays (Fri→Mon is fine)
+      - weekly: at least once per 7-day window
+      - 3x_week: at least 3 completions in any rolling 7-day window
+
+    Idempotent — calling twice on the same day is a no-op (returns current streak).
+
+    Params:
+      user_id: The user who owns this habit.
+      habit_id: The habit UUID to mark complete.
+
+    Returns on success:
+      {"habit_id": str, "date": str, "current_streak": int, "longest_streak": int}
+
+    Returns on error:
+      {"error": str}
+    """
+    try:
+        table = get_table()
+
+        # Use user's timezone for "today"
+        user_resp = table.get_item(Key={"pk": f"USER#{user_id}", "sk": "#METADATA"})
+        user_item = user_resp.get("Item", {})
+        user_tz_str = user_item.get("timezone", "America/New_York")
+        try:
+            from zoneinfo import ZoneInfo
+            user_tz = ZoneInfo(user_tz_str)
+        except Exception:
+            from zoneinfo import ZoneInfo
+            user_tz = ZoneInfo("America/New_York")
+
+        now_local = datetime.now(user_tz)
+        today = now_local.strftime("%Y-%m-%d")
+
+        # Check if already completed today
+        done_resp = table.get_item(Key={"pk": f"HABIT#{habit_id}", "sk": f"DONE#{today}"})
+        if done_resp.get("Item"):
+            item = done_resp["Item"]
+            return {
+                "habit_id": habit_id,
+                "date": today,
+                "current_streak": int(item.get("streak_at_completion", 0)),
+                "longest_streak": int(item.get("longest_at_completion", 0)),
+                "already_done": True,
+            }
+
+        # Get the habit record
+        habit_resp = table.query(
+            IndexName="gsi1",
+            KeyConditionExpression=Key("gsi1pk").eq(f"HABIT#{habit_id}") & Key("gsi1sk").eq("#METADATA"),
+        )
+        habits = habit_resp.get("Items", [])
+        if not habits:
+            return {"error": f"Habit {habit_id} not found"}
+        habit = habits[0]
+
+        # Compute streak based on frequency
+        last_completed = habit.get("last_completed", "")
+        frequency = habit.get("frequency", "daily")
+        current_streak = int(habit.get("current_streak", 0))
+        longest_streak = int(habit.get("longest_streak", 0))
+
+        if _is_streak_alive(last_completed, today, frequency):
+            current_streak += 1
+        else:
+            current_streak = 1
+
+        if current_streak > longest_streak:
+            longest_streak = current_streak
+
+        # Write completion log
+        table.put_item(Item={
+            "pk": f"HABIT#{habit_id}",
+            "sk": f"DONE#{today}",
+            "user_id": user_id,
+            "completed_at": now_local.isoformat(),
+            "streak_at_completion": current_streak,
+            "longest_at_completion": longest_streak,
+        })
+
+        # Update habit record
+        table.update_item(
+            Key={"pk": f"USER#{user_id}", "sk": f"HABIT#{habit_id}"},
+            UpdateExpression="SET last_completed = :d, current_streak = :cs, longest_streak = :ls",
+            ExpressionAttributeValues={":d": today, ":cs": current_streak, ":ls": longest_streak},
+        )
+
+        logger.info("Habit completed", habit_id=habit_id, user_id=user_id, streak=current_streak)
+        return {"habit_id": habit_id, "date": today, "current_streak": current_streak, "longest_streak": longest_streak}
+    except Exception as e:
+        logger.exception("complete_habit failed")
+        return {"error": str(e)}
+
+
+@tool
+def list_habits(user_id: str) -> dict:
+    """
+    List all active habits for a user with their current streak info.
+
+    Params:
+      user_id: The user whose habits to list.
+
+    Returns on success:
+      {"habits": [{"habit_id": str, "title": str, "frequency": str,
+        "current_streak": int, "longest_streak": int, "last_completed": str,
+        "done_today": bool}]}
+
+    Returns on error:
+      {"error": str}
+    """
+    try:
+        table = get_table()
+
+        # Use user's timezone for "today"
+        user_resp = table.get_item(Key={"pk": f"USER#{user_id}", "sk": "#METADATA"})
+        user_item = user_resp.get("Item", {})
+        user_tz_str = user_item.get("timezone", "America/New_York")
+        try:
+            from zoneinfo import ZoneInfo
+            user_tz = ZoneInfo(user_tz_str)
+        except Exception:
+            from zoneinfo import ZoneInfo
+            user_tz = ZoneInfo("America/New_York")
+        today = datetime.now(user_tz).strftime("%Y-%m-%d")
+
+        resp = table.query(
+            KeyConditionExpression=Key("pk").eq(f"USER#{user_id}") & Key("sk").begins_with("HABIT#"),
+        )
+        items = resp.get("Items", [])
+
+        habits = []
+        for h in items:
+            if not h.get("active", True):
+                continue
+            habits.append({
+                "habit_id": h.get("habit_id"),
+                "title": h.get("title", ""),
+                "frequency": h.get("frequency", "daily"),
+                "current_streak": int(h.get("current_streak", 0)),
+                "longest_streak": int(h.get("longest_streak", 0)),
+                "last_completed": h.get("last_completed", ""),
+                "done_today": h.get("last_completed", "") == today,
+            })
+
+        logger.info("Habits listed", user_id=user_id, count=len(habits))
+        return {"habits": habits}
+    except Exception as e:
+        logger.exception("list_habits failed")
         return {"error": str(e)}
