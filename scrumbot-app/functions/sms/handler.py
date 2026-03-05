@@ -16,6 +16,7 @@ from shared.db import (
     get_consent, record_consent, revoke_consent,
     get_or_create_user,
     get_conversation, save_conversation,
+    store_feedback,
 )
 from shared.tools import (
     create_project, update_project, create_work_cycle, list_active_projects,
@@ -24,6 +25,7 @@ from shared.tools import (
     record_velocity, update_user_patterns, complete_onboarding,
     set_user_preference,
     create_habit, complete_habit, list_habits,
+    submit_feedback,
 )
 
 logger = Logger()
@@ -40,6 +42,7 @@ TOOLS = [
     record_velocity, update_user_patterns, complete_onboarding,
     set_user_preference,
     create_habit, complete_habit, list_habits,
+    submit_feedback,
 ]
 
 _OPT_IN_PROMPT = (
@@ -56,9 +59,11 @@ _UNSUBSCRIBED = (
     "Text us again anytime to re-join."
 )
 _HELP_TEXT = (
-    "Stride helps you plan your week, check in daily, and review progress.\n"
-    "Just text me naturally — e.g. 'plan my week' or 'I finished the logo'.\n"
-    "Reply STOP to unsubscribe."
+    "Stride helps you finish what you start.\n"
+    "Try: 'plan my week', 'I finished the logo', 'I'm stuck on the proposal'\n"
+    "Set reminders: 'remind me at 8am' or 'I'm in California'\n"
+    "Feedback: FEEDBACK <your thoughts>\n"
+    "Unsubscribe: STOP"
 )
 _BLOCKED_REPLY = (
     "I'm Stride — I only help with your goals and plans.\n"
@@ -76,15 +81,23 @@ You are responding via SMS. Additional rules:
 """
 
 _ONBOARDING_ADDENDUM = """
-This is a new user — they have no projects yet.
-Start with setup: ask what they want to achieve (their goal).
-Ask for a target date: "When do you want this done by?"
-Create their first project with the target_date, suggest milestones,
-create a first work cycle covering this week, and their initial tasks.
-After creating at least one task, ask if they have any daily practices
-they want to maintain (habits like writing, exercise, reading).
-If yes, use create_habit. If no, that's fine.
-Then call complete_onboarding to mark them as set up.
+NEW USER — no projects yet. Run setup.
+
+ONE QUESTION AT A TIME. Never send multiple questions in one message.
+SMS users drop off if they get a wall of text. Ask. Wait. Ask again.
+
+Onboarding sequence:
+1. "Hey! I'm Stride, your productivity coach. What's one thing you want to accomplish?"
+2. Wait for their answer. Then: "When do you want that done by?" (If they say no deadline, that's fine.)
+3. Call create_project with their goal + target_date.
+4. "What's the most important thing to do this week toward that goal?" — create a work cycle + first task.
+5. One more task: "Anything else this week, or is that the focus?"
+6. "Any daily habits you want to build — like writing, exercise, or reading?" — use create_habit if yes.
+7. Call complete_onboarding.
+8. Explain the rhythm in one message: "Here's how we work: Monday I'll help you plan, we check in daily, and Friday we review. Text me anytime."
+
+Keep each reply under 160 chars if possible — aim for 1 SMS segment per message.
+Never mention 'points', 'sprints', or 'stories'.
 """
 
 _CAPACITY_LANGUAGE_ADDENDUM = """
@@ -238,6 +251,15 @@ def sms():
     # 6. HELP keyword
     if msg_upper == "HELP":
         return _twiml(_HELP_TEXT)
+
+    # 6.5. FEEDBACK keyword — bypasses agent, stores directly, no consent required
+    if msg_upper.startswith("FEEDBACK "):
+        feedback_text = message[len("FEEDBACK "):].strip()
+        if feedback_text:
+            store_feedback(user_id, feedback_text, source="keyword")
+            logger.info("Feedback received via keyword", user_id=user_id)
+            return _twiml("Thanks — I'll read it.")
+        return _twiml("Try: FEEDBACK followed by your thoughts.")
 
     # 7. Consent check
     consent = get_consent(user_id)

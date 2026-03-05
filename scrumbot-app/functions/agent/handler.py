@@ -14,6 +14,7 @@ from shared.tools import (
     record_velocity, update_user_patterns, complete_onboarding,
     set_user_preference,
     create_habit, complete_habit, list_habits,
+    submit_feedback,
 )
 
 logger = Logger()
@@ -29,6 +30,7 @@ TOOLS = [
     record_velocity, update_user_patterns, complete_onboarding,
     set_user_preference,
     create_habit, complete_habit, list_habits,
+    submit_feedback,
 ]
 
 

@@ -320,3 +320,32 @@ def save_conversation(user_id: str, messages: list, planning_day: int = 1, user_
     except Exception as e:
         logger.error("save_conversation failed", error=str(e), user_id=user_id)
         return False
+
+
+# ---------------------------------------------------------------------------
+# Feedback
+# ---------------------------------------------------------------------------
+
+def store_feedback(user_id: str, text: str, source: str) -> None:
+    """
+    Persist user feedback to DynamoDB.
+
+    DynamoDB key:
+        PK: USER#{user_id}
+        SK: FEEDBACK#{iso_timestamp}
+
+    source: "keyword" (user typed FEEDBACK ...) | "agent" (agent-prompted after review)
+    Errors are swallowed — a logging failure must not surface to the user.
+    """
+    now = datetime.now(timezone.utc).isoformat() + "Z"
+    try:
+        get_table().put_item(Item={
+            "pk": f"USER#{user_id}",
+            "sk": f"FEEDBACK#{now}",
+            "body": text,
+            "source": source,
+            "created_at": now,
+        })
+        logger.info("Feedback stored", user_id=user_id, source=source)
+    except Exception as e:
+        logger.error("store_feedback failed", error=str(e), user_id=user_id)

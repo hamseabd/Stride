@@ -159,14 +159,16 @@ curl localhost:8000/test-scheduler
 |-------|------|----------|--------|--------|
 | **Phase 0** | Pre-Build Fixes | First (before any new features) | ~2 hours | ✅ DONE |
 | **Phase 1** | Foundation (models, tools, conversation memory, chat.py, tests) | Day 1 | ~1 day | ✅ DONE |
-| **Phase 2** | Feedback + Onboarding | Day 2-3 | ~2 days | ⏳ Next |
-| **Phase 3** | Proactive Messaging | Day 4-8 | ~5 days | — |
+| **Phase 2** | Feedback + Onboarding | Day 2-3 | ~2 days | ✅ DONE |
+| **Phase 3** | Proactive Messaging | Day 4-8 | ~5 days | ⏳ **Next** |
 | **Phase 4** | Polish + Deploy | Day 9-12 | ~4 days | — |
 | **Beta** | 10 free users | After A2P approval, ~1 month | — | — |
 | **Sprint 4** | Team Version | After beta | ~14 days | — |
 | **Sprint 5** | Payments (Stripe) | After team validated | ~10 days | — |
 
-### Phase 0 — Pre-Build Fixes (do first)
+**Known bugs:** 1 — see `bugfix.md`. BUG-001 must be fixed as the first step of Phase 2.
+
+### Phase 0 — Pre-Build Fixes ✅ DONE
 
 Surgical fixes to existing tools that would cause bugs the moment we build Phase 1:
 
@@ -183,37 +185,57 @@ Surgical fixes to existing tools that would cause bugs the moment we build Phase
 
 ## Sprint 3 — Individual Beta-Ready (3 weeks)
 
-### Pre-Build: Phase 0 Fixes
+### Pre-Build: Phase 0 Fixes ✅ DONE
 
-Fix existing tools before building anything new. See `phase0-fixes.md`.
+All 5 fixes applied. See `phase0-fixes.md`.
 
-### Week 1: Core Foundation
+### Week 1, Part 1: Core Foundation ✅ DONE (Phase 1)
 
-#### 1. Conversation History Persistence (the #1 fix)
+#### 1. Conversation History Persistence ✅ DONE
 
-`functions/sms/handler.py:135` currently creates `messages=[]` on every SMS. No memory.
-
-- New DynamoDB entity: `USER#{user_id}` / `CONVERSATION#CURRENT`
-- Stores Strands `messages` list (capped at 20 turns)
-- SMS handler: load history → call agent → save updated history
-- Strip tool call/result payloads from stored history (stay under 400KB item limit)
-- **Weekly reset:** clear conversation every Monday (or user's `planning_day`). Agent keeps full access to projects/tasks/velocity via tools — only chat history resets.
-- New `db.py` functions: `get_conversation(user_id)`, `save_conversation(user_id, messages)`
+- `CONVERSATION#CURRENT` DynamoDB entity per user
+- `get_conversation()` / `save_conversation()` in `db.py`
+- Tool payloads stripped, capped at 20 turns, 350KB safety check
+- Timezone-aware weekly reset on user's `planning_day`
 - **Files:** `shared/db.py`, `functions/sms/handler.py`
 
-#### 2. User Preferences
+#### 2. User Preferences ✅ DONE
 
-Add fields to User entity (`USER#{user_id}` / `#METADATA`):
-- `timezone` — IANA format (e.g., "America/New_York"), default "America/New_York"
-- `checkin_time` — local time for daily reminder, default "09:00"
-- `evening_time` — local time for evening status, default "18:00"
-- `planning_day` — 1=Monday (default), 7=Sunday
+- `timezone`, `checkin_time`, `evening_time`, `planning_day` fields on User model
+- `set_user_preference` tool — validates format, writes to `#METADATA`
+- **Files:** `shared/models.py`, `shared/tools.py`
 
-Users set these conversationally: "I prefer evening check-ins" → agent calls a `set_user_preference` tool → updates the User record.
+#### 4. Data Moat Fields ✅ DONE
 
-**Files:** `shared/models.py`, `shared/db.py`, `shared/tools.py` (new `set_user_preference` tool)
+- `Task.status_changed_at` — written on every `update_task_status()` call
+- `Blocker.category` — enum: external | scope | capacity | process
+- `Velocity.active_project_count` — computed from active projects at review time
+- `UserPattern.preferred_tone` — default "balanced", injected into system prompt
+- **Files:** `shared/models.py`, `shared/tools.py`
 
-#### 3. Feedback Mechanism
+#### 5. Local Dev Tooling — chat.py ✅ DONE
+
+- `chat.py` — interactive SMS simulator against LocalStack (gitignored)
+- `/test-scheduler` endpoint: ⏳ Phase 2 (see below)
+
+#### Habit Model + Tools ✅ DONE (added in Phase 1)
+
+- `Habit` model — frequency: daily | weekdays | 3x_week | weekly
+- `create_habit`, `complete_habit`, `list_habits` tools
+- Frequency-aware streak logic (`_is_streak_alive`)
+- Timezone-aware "done today" check
+
+#### Tests ✅ DONE
+
+- 104 tests across 6 test files: `test_models`, `test_tools`, `test_db`, `test_guards`, `test_conversation`, `test_streak`
+
+---
+
+### Week 1, Part 2: ⏳ Phase 2 — Next
+
+**Start here. Apply BUG-001 fix first. See `phase2-feedback-onboarding.md`.**
+
+#### 3. Feedback Mechanism ⏳ Phase 2
 
 **Collection (two paths):**
 - **Keyword:** User texts `FEEDBACK <their thoughts>` → stored directly, no agent call, instant ack
@@ -221,33 +243,36 @@ Users set these conversationally: "I prefer evening check-ins" → agent calls a
 
 **Storage:** `USER#{user_id}` / `FEEDBACK#{ISO_timestamp}` — body, source, created_at
 
-**Developer reads:** `make feedback` → DynamoDB scan → formatted table
+**Developer reads:** `make feedback` → DynamoDB scan → formatted table (dev-only, scan acceptable)
 
-**Files:** `functions/sms/handler.py` (keyword in guard chain), `shared/tools.py` (new `submit_feedback` tool), `Makefile`
+**Files:** `functions/sms/handler.py` (keyword in guard chain), `shared/tools.py` (new `submit_feedback` tool), `shared/db.py` (new `store_feedback()`), `Makefile`
 
-#### 4. Data Moat Fields (4 schema additions)
+#### 6. Better Onboarding + HELP ⏳ Phase 2
 
-Add to existing models — DynamoDB is schemaless, zero migration:
-- `Task.status_changed_at` — set on every `update_task_status()` call
-- `Blocker.category` — agent selects from enum during `flag_blocker()` call
-- `Velocity.active_project_count` — computed during `record_velocity()` from `list_active_projects()`
-- `UserPattern.preferred_tone` — default "balanced", included in system prompt. Updated from engagement signals every 2 weeks.
+- One question at a time — no wall of text; SMS users drop off if overwhelmed
+- HELP text: includes FEEDBACK keyword, reminder customization example, concise
+- After first project, agent explains weekly rhythm (Monday plan / daily / Friday review)
+- **Files:** `functions/sms/handler.py` (`_HELP_TEXT`, `_ONBOARDING_ADDENDUM`)
 
-**Files:** `shared/models.py`, `shared/tools.py` (update 3 existing tools), `shared/prompt.py` (inject tone into system prompt)
+#### Tone Adaptation — Phase 2 Scope ⏳ Phase 2
 
-#### 5. Local Dev Tooling
+Phase 2 scope is the bugfix only: `update_user_patterns` currently resets `preferred_tone`
+to "balanced" on every weekly review (BUG-001). The fix preserves the existing value.
 
-- Build `chat.py` — interactive SMS simulator against LocalStack
-- Add `POST /test-scheduler` to local Flask server (dry-run scheduler)
-- **Files:** `chat.py`, `local_server.py` (both gitignored)
+System prompt injection of `preferred_tone` is already in place (done in Phase 1).
 
-#### 6. Better Onboarding + HELP
+Full tone derivation (latency tracking, heuristics, updating preferred_tone from behavior)
+is deferred to Phase 3 — it requires outbound message logs that don't exist until the
+scheduler Lambda is built.
 
-- Expand system prompt: walk new users through setup one question at a time
-- Enrich HELP keyword: what Stride does, example messages, how to customize reminders
-- User can set preferences during onboarding ("I prefer evening check-ins" → sets `checkin_time`)
-- After first project created, agent explains the daily/weekly rhythm
-- **Files:** `shared/prompt.py`, `functions/sms/handler.py`
+**Files:** `shared/tools.py` (BUG-001 fix — 2 lines)
+
+#### /test-scheduler Scaffold ⏳ Phase 2
+
+- `GET /test-scheduler` in `local_server.py` — shows what message each user would receive
+  based on their timezone + current time. Dry-run by default, `?send=true` for real send.
+- Full implementation in Phase 3 when proactive consent + outbound SMS exist.
+- **Files:** `local_server.py` (gitignored)
 
 ---
 
@@ -515,36 +540,39 @@ Will decide what goes behind paywall after seeing what beta users value.
 
 | Feature | Status | Phase |
 |---------|--------|-------|
-| Inbound SMS + 10-step guard chain | Exists | — |
-| 18 Strands tools (was 13) | **Done** | Phase 0 + 1 |
-| DynamoDB single-table (14 entities, 1 GSI) | **Done** | Phase 0 + 1 |
-| CI/CD (GitHub Actions OIDC) | Exists | — |
-| `create_project` target_date param | **Done** | Phase 0 |
-| `list_active_projects` returns target_date | **Done** | Phase 0 |
-| `update_project` tool | **Done** | Phase 0 |
-| `set_user_preference` tool | **Done** | Phase 0 |
-| SMS handler max_tokens (512 → 1024) | **Done** | Phase 0 |
-| Conversation memory | **Done** | Phase 1 |
-| Goal model (target_date + decomposition prompt) | **Done** | Phase 1 |
-| Habit model + tools (create, complete, list) | **Done** | Phase 1 |
-| Data moat fields (4 schema additions) | **Done** | Phase 1 |
-| Timezone-aware date logic | **Done** | Phase 1 |
-| Frequency-aware habit streaks | **Done** | Phase 1 |
-| User preferences (timezone, times) | **Done** | Phase 1 |
-| chat.py SMS simulator | **Done** | Phase 1 |
-| Unit + integration test suite (104 tests) | **Done** | Phase 1 |
-| Feedback collection | **Missing** | Sprint 3, Phase 2 |
-| Better onboarding + HELP | **Missing** | Sprint 3, Phase 2 |
-| Tone adaptation (preferred_tone + latency tracking) | **Missing** | Sprint 3, Phase 2 |
-| /test-scheduler endpoint | **Missing** | Sprint 3, Phase 2 |
-| Outbound SMS (Twilio REST) | **Missing** | Sprint 3, Phase 3 |
-| Proactive consent (TCPA) | **Missing** | Sprint 3, Phase 3 |
-| EventBridge scheduler | **Missing** | Sprint 3, Phase 3 |
-| Morning/evening/weekly messages | **Missing** | Sprint 3, Phase 3 |
-| Team data model + tools | **Missing** | Sprint 4 |
-| Second Twilio number | **Missing** | Sprint 4 |
-| Admin capabilities + summaries | **Missing** | Sprint 4 |
-| Stripe payments | **Missing** | Sprint 5 |
+| Inbound SMS + 10-step guard chain | ✅ Done | — |
+| Lambda container images + ECR deploy | ✅ Done | deploy plan |
+| CI/CD (GitHub Actions OIDC) | ✅ Done | — |
+| 19 Strands tools (was 13) | ✅ Done (18) + ⏳ +1 Phase 2 | Phase 0 + 1 + 2 |
+| DynamoDB single-table (14 entities, 1 GSI) | ✅ Done | Phase 0 + 1 |
+| `create_project` target_date param | ✅ Done | Phase 0 |
+| `list_active_projects` returns target_date | ✅ Done | Phase 0 |
+| `update_project` tool | ✅ Done | Phase 0 |
+| `set_user_preference` tool | ✅ Done | Phase 0 |
+| SMS handler max_tokens (512 → 1024) | ✅ Done | Phase 0 |
+| Conversation memory (per-user, weekly reset) | ✅ Done | Phase 1 |
+| Goal model (target_date + decomposition prompt) | ✅ Done | Phase 1 |
+| Habit model + tools (create, complete, list) | ✅ Done | Phase 1 |
+| Data moat fields (4 schema additions) | ✅ Done | Phase 1 |
+| Timezone-aware date logic | ✅ Done | Phase 1 |
+| Frequency-aware habit streaks | ✅ Done | Phase 1 |
+| User preferences (timezone, times, planning_day) | ✅ Done | Phase 1 |
+| chat.py SMS simulator | ✅ Done | Phase 1 |
+| Unit + integration test suite (104 tests) | ✅ Done | Phase 1 |
+| BUG-001: preferred_tone reset fix | ⏳ Phase 2 (first step) | `bugfix.md` |
+| Feedback collection (keyword + tool + make command) | ⏳ Phase 2 | Phase 2 |
+| Better onboarding + HELP | ⏳ Phase 2 | Phase 2 |
+| Tone adaptation — preferred_tone bug fix | ⏳ Phase 2 | Phase 2 |
+| /test-scheduler scaffold endpoint | ⏳ Phase 2 | Phase 2 |
+| Outbound SMS helper (shared/sms.py) | — Phase 3 | Phase 3 |
+| Proactive consent (CONSENT#PROACTIVE, TCPA) | — Phase 3 | Phase 3 |
+| EventBridge scheduler Lambda | — Phase 3 | Phase 3 |
+| Morning/evening/weekly proactive messages | — Phase 3 | Phase 3 |
+| Tone derivation (latency tracking + heuristics) | — Phase 3 | Phase 3 |
+| Team data model + tools | — Sprint 4 | Sprint 4 |
+| Second Twilio number | — Sprint 4 | Sprint 4 |
+| Admin capabilities + summaries | — Sprint 4 | Sprint 4 |
+| Stripe payments | — Sprint 5 | Sprint 5 |
 
 ---
 

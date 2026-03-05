@@ -687,6 +687,7 @@ def update_user_patterns(
         old_pace  = float(existing.get("avg_pace", 0.0)) if existing else 0.0
         old_rate  = float(existing.get("avg_completion_rate", 0.0)) if existing else 0.0
         old_blockers = existing.get("common_blockers", []) if existing else []
+        existing_tone = existing.get("preferred_tone", "balanced") if existing else "balanced"
 
         new_count = old_count + 1
         new_pace  = ((old_pace * old_count) + delivered_points) / new_count
@@ -701,6 +702,7 @@ def update_user_patterns(
             avg_completion_rate=round(new_rate, 2),
             common_blockers=merged_blockers,
             cycle_count=new_count,
+            preferred_tone=existing_tone,
         )
         item = pattern.model_dump()
         item["pk"] = f"USER#{user_id}"
@@ -749,6 +751,36 @@ def complete_onboarding(user_id: str) -> dict:
         return {"error": "failed to mark user as onboarded"}
     except Exception as e:
         logger.exception("complete_onboarding failed")
+        return {"error": str(e)}
+
+
+@tool
+def submit_feedback(user_id: str, feedback: str) -> dict:
+    """
+    Store user feedback about Stride. Call this when:
+    1. The agent asks for feedback after a weekly review and the user provides it.
+    2. The user volunteers feedback during any session.
+
+    Do NOT call this for the FEEDBACK keyword path — that is handled directly
+    in the SMS guard chain without going through the agent.
+
+    Params:
+      user_id: The user submitting feedback.
+      feedback: The feedback text (what the user said).
+
+    Returns on success:
+      {"stored": true}
+
+    Returns on error:
+      {"error": str}
+    """
+    try:
+        from shared.db import store_feedback
+        store_feedback(user_id, feedback, source="agent")
+        logger.info("Feedback submitted via tool", user_id=user_id)
+        return {"stored": True}
+    except Exception as e:
+        logger.exception("submit_feedback failed")
         return {"error": str(e)}
 
 
