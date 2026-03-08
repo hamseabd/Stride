@@ -160,6 +160,7 @@ curl localhost:8000/test-scheduler
 | **Phase 0** | Pre-Build Fixes | First (before any new features) | ~2 hours | ✅ DONE |
 | **Phase 1** | Foundation (models, tools, conversation memory, chat.py, tests) | Day 1 | ~1 day | ✅ DONE |
 | **Phase 2** | Feedback + Onboarding | Day 2-3 | ~2 days | ✅ DONE |
+| **Consolidation** | Single Lambda (stride-sms only) | — | ~1 hour | ✅ DONE |
 | **Phase 3** | Proactive Messaging | Day 4-8 | ~5 days | ⏳ **Next** |
 | **Phase 4** | Polish + Deploy | Day 9-12 | ~4 days | — |
 | **Beta** | 10 free users | After A2P approval, ~1 month | — | — |
@@ -178,7 +179,7 @@ Surgical fixes to existing tools that would cause bugs the moment we build Phase
 4. **`set_user_preference` tool** — moved from Phase 2; needed during onboarding when users say "I'm in California"
 5. **`max_tokens` 512 → 1024** — system prompt is growing; 512 cuts off mid-thought during onboarding
 
-**Files:** `shared/tools.py`, `functions/sms/handler.py`, `functions/agent/handler.py`
+**Files:** `shared/tools.py`, `functions/sms/handler.py`
 **Detail:** See `phase0-fixes.md`
 
 ---
@@ -231,11 +232,9 @@ All 5 fixes applied. See `phase0-fixes.md`.
 
 ---
 
-### Week 1, Part 2: ⏳ Phase 2 — Next
+### Week 1, Part 2: ✅ Phase 2 — Done
 
-**Start here. Apply BUG-001 fix first. See `phase2-feedback-onboarding.md`.**
-
-#### 3. Feedback Mechanism ⏳ Phase 2
+#### 3. Feedback Mechanism ✅ Done
 
 **Collection (two paths):**
 - **Keyword:** User texts `FEEDBACK <their thoughts>` → stored directly, no agent call, instant ack
@@ -247,14 +246,14 @@ All 5 fixes applied. See `phase0-fixes.md`.
 
 **Files:** `functions/sms/handler.py` (keyword in guard chain), `shared/tools.py` (new `submit_feedback` tool), `shared/db.py` (new `store_feedback()`), `Makefile`
 
-#### 6. Better Onboarding + HELP ⏳ Phase 2
+#### 6. Better Onboarding + HELP ✅ Done
 
 - One question at a time — no wall of text; SMS users drop off if overwhelmed
 - HELP text: includes FEEDBACK keyword, reminder customization example, concise
 - After first project, agent explains weekly rhythm (Monday plan / daily / Friday review)
 - **Files:** `functions/sms/handler.py` (`_HELP_TEXT`, `_ONBOARDING_ADDENDUM`)
 
-#### Tone Adaptation — Phase 2 Scope ⏳ Phase 2
+#### Tone Adaptation — Phase 2 Scope ✅ Done
 
 Phase 2 scope is the bugfix only: `update_user_patterns` currently resets `preferred_tone`
 to "balanced" on every weekly review (BUG-001). The fix preserves the existing value.
@@ -267,7 +266,7 @@ scheduler Lambda is built.
 
 **Files:** `shared/tools.py` (BUG-001 fix — 2 lines)
 
-#### /test-scheduler Scaffold ⏳ Phase 2
+#### /test-scheduler Scaffold ✅ Done
 
 - `GET /test-scheduler` in `local_server.py` — shows what message each user would receive
   based on their timezone + current time. Dry-run by default, `?send=true` for real send.
@@ -359,7 +358,7 @@ Conversation resets **Monday morning** (user's `planning_day`). This is after Fr
 #### 10. Infrastructure (Terraform)
 
 - New `eventbridge.tf`: Scheduler rule (rate: 15 min) → stride-scheduler Lambda
-- New Lambda module in `lambda.tf` (same pattern as existing 3)
+- New Lambda module in `lambda.tf` (same pattern as `stride-sms`)
 - New ECR repo in `ecr.tf`: `stride-scheduler`
 - Update `scripts/build_and_push.sh` for 4th function
 - IAM: add `dynamodb:Scan` to existing `stride-lambda-exec` role
@@ -541,9 +540,9 @@ Will decide what goes behind paywall after seeing what beta users value.
 | Feature | Status | Phase |
 |---------|--------|-------|
 | Inbound SMS + 10-step guard chain | ✅ Done | — |
-| Lambda container images + ECR deploy | ✅ Done | deploy plan |
+| Lambda container image + ECR deploy (stride-sms only) | ✅ Done | deploy plan |
 | CI/CD (GitHub Actions OIDC) | ✅ Done | — |
-| 19 Strands tools (was 13) | ✅ Done (18) + ⏳ +1 Phase 2 | Phase 0 + 1 + 2 |
+| 19 Strands tools | ✅ Done | Phase 0 + 1 + 2 |
 | DynamoDB single-table (14 entities, 1 GSI) | ✅ Done | Phase 0 + 1 |
 | `create_project` target_date param | ✅ Done | Phase 0 |
 | `list_active_projects` returns target_date | ✅ Done | Phase 0 |
@@ -559,11 +558,11 @@ Will decide what goes behind paywall after seeing what beta users value.
 | User preferences (timezone, times, planning_day) | ✅ Done | Phase 1 |
 | chat.py SMS simulator | ✅ Done | Phase 1 |
 | Unit + integration test suite (104 tests) | ✅ Done | Phase 1 |
-| BUG-001: preferred_tone reset fix | ⏳ Phase 2 (first step) | `bugfix.md` |
-| Feedback collection (keyword + tool + make command) | ⏳ Phase 2 | Phase 2 |
-| Better onboarding + HELP | ⏳ Phase 2 | Phase 2 |
-| Tone adaptation — preferred_tone bug fix | ⏳ Phase 2 | Phase 2 |
-| /test-scheduler scaffold endpoint | ⏳ Phase 2 | Phase 2 |
+| BUG-001: preferred_tone reset fix | ✅ Done | Phase 2 |
+| Feedback collection (keyword + tool + make command) | ✅ Done | Phase 2 |
+| Better onboarding + HELP | ✅ Done | Phase 2 |
+| Tone adaptation — preferred_tone bug fix | ✅ Done | Phase 2 |
+| /test-scheduler scaffold endpoint | ✅ Done | Phase 2 |
 | Outbound SMS helper (shared/sms.py) | — Phase 3 | Phase 3 |
 | Proactive consent (CONSENT#PROACTIVE, TCPA) | — Phase 3 | Phase 3 |
 | EventBridge scheduler Lambda | — Phase 3 | Phase 3 |

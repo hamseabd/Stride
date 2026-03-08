@@ -101,7 +101,7 @@ framework runs entirely under the hood; users never see it.
 ## REPO CONVENTIONS
 - `scrumbot-infra/`: Terraform only, serverless.tf modules, no raw `aws_lambda_function` resources
 - `scrumbot-app/`: Python only, no Terraform
-  - `/functions/<name>/` — one `handler.py` per Lambda
+  - `/functions/sms/` — the one Lambda handler (`handler.py`)
   - `/shared/` — `tools.py`, `db.py`, `models.py`, `prompt.py`, `guards.py`
 - All Strands tools defined in `shared/tools.py`, never inline
 - Lambda Powertools decorator pattern on every handler

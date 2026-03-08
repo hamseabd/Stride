@@ -1,4 +1,4 @@
-.PHONY: up down build push deploy test chat logs-checkin logs-agent logs-sms feedback feedback-user
+.PHONY: up down build push deploy test chat logs-sms feedback feedback-user
 
 # ── Config ────────────────────────────────────────────────────────────────────
 TABLE ?= stride-prod
@@ -29,12 +29,6 @@ deploy: push
 	  -var="image_tag=sha-$(shell git rev-parse --short HEAD)"
 
 # ── Logs ────────────────────────────────────────────────────────────────────
-logs-checkin:
-	aws logs tail /aws/lambda/stride-checkin --follow
-
-logs-agent:
-	aws logs tail /aws/lambda/stride-agent --follow
-
 logs-sms:
 	aws logs tail /aws/lambda/stride-sms --follow
 

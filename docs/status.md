@@ -1,5 +1,5 @@
 # Stride — Project Status
-Last updated: 2026-03-01
+Last updated: 2026-03-07
 
 ---
 
@@ -22,7 +22,7 @@ users never see it. Plain language only.
 | **Sprint 2** | ✅ Done | Real handlers, consent flow, onboarding, all 3 endpoints live |
 | **Sprint 3** | ⏳ Not started | Auth, Secrets Manager, proactive outbound SMS, pattern auto-update |
 
-**Current state:** Deployed. All 3 endpoints live at `https://cbkpntvax6.execute-api.us-east-1.amazonaws.com`
+**Current state:** Deployed. `POST /sms` live at `https://cbkpntvax6.execute-api.us-east-1.amazonaws.com`. stride-checkin and stride-agent removed — stride-sms is the only Lambda.
 
 ---
 
@@ -31,11 +31,9 @@ users never see it. Plain language only.
 | Resource | Name | Status |
 |---|---|---|
 | API Gateway (HTTP) | `stride-api` | ✅ Live |
-| Lambda | `stride-checkin` | ✅ Live (256MB / 10s / ARM64) |
-| Lambda | `stride-agent` | ✅ Live (512MB / 30s / ARM64) |
 | Lambda | `stride-sms` | ✅ Live (256MB / 15s / ARM64) |
 | DynamoDB | `stride-prod` | ✅ Live (PAY_PER_REQUEST, PITR on) |
-| ECR | `stride-checkin/agent/sms` | ✅ Live (lifecycle: keep last 10 sha- tags) |
+| ECR | `stride-sms` | ✅ Live (lifecycle: keep last 10 sha- tags) |
 | IAM Role | `stride-lambda-exec` | ✅ Live |
 | S3 | `stride-tf-state` | ✅ Live (Terraform remote state) |
 | DynamoDB | `stride-tf-locks` | ✅ Live (Terraform state lock) |
@@ -49,9 +47,7 @@ users never see it. Plain language only.
 
 | Route | Lambda | Purpose |
 |---|---|---|
-| `POST /checkin` | `stride-checkin` | Daily check-in — direct tool calls, no agent |
-| `POST /ceremony` | `stride-agent` | All conversational flows — Strands agent |
-| `POST /sms` | `stride-sms` | Twilio webhook — full guard chain + consent |
+| `POST /sms` | `stride-sms` | Twilio webhook — full guard chain + consent + agent |
 
 ---
 
@@ -71,13 +67,14 @@ users never see it. Plain language only.
 | `Velocity` | cycle_id, project_id, planned_points, delivered_points, cycle_name |
 | `UserPattern` | user_id, avg_pace, avg_completion_rate, common_blockers, cycle_count |
 
-### `tools.py` ✅ — 13 tools
+### `tools.py` ✅ — 19 tools
 
 | Tool | Purpose |
 |---|---|
-| `create_project` | Create a new project for a user |
+| `create_project` | Create a new project for a user (with optional target_date) |
+| `update_project` | Update project name, description, or target_date |
 | `create_work_cycle` | Create a new work cycle (week) under a project |
-| `list_active_projects` | List all projects + their active cycle |
+| `list_active_projects` | List all projects + their active cycle + target_date |
 | `create_task` | Add a task to a work cycle (S/M/L/XL estimate) |
 | `update_task_status` | Move a task to todo / in_progress / done / blocked |
 | `get_cycle_data` | Get a work cycle + all its tasks |
@@ -88,6 +85,11 @@ users never see it. Plain language only.
 | `record_velocity` | Write pace result after a cycle ends (planned vs delivered) |
 | `update_user_patterns` | Update rolling averages after a weekly review |
 | `complete_onboarding` | Mark a user as onboarded after first project + cycle + task created |
+| `set_user_preference` | Set timezone, checkin_time, evening_time, or planning_day |
+| `create_habit` | Create a recurring habit (daily / weekdays / 3x_week / weekly) |
+| `complete_habit` | Mark a habit done for today |
+| `list_habits` | List all habits with streak + done-today status |
+| `submit_feedback` | Store agent-prompted user feedback |
 
 ### `db.py` ✅
 - `get_table()` — boto3 Table factory
@@ -96,6 +98,8 @@ users never see it. Plain language only.
 - `get_consent / record_consent / revoke_consent` — TCPA SMS consent
 - `get_or_create_user(user_id, phone)` — race-safe conditional PutItem
 - `set_onboarded(user_id)` — sets `onboarded=True`
+- `get_conversation / save_conversation` — per-user history persistence (`CONVERSATION#CURRENT`)
+- `store_feedback(user_id, body, source)` — writes `FEEDBACK#{iso}` record
 
 ### `guards.py` ✅
 - `check_message(message)` — `None` (pass), `"empty"`, or `"too_long"` (>500 chars)
@@ -108,14 +112,8 @@ Single-source `STRIDE_SYSTEM_PROMPT`. Covers all 5 session types, estimate rules
 
 ## Lambda handlers (`scrumbot-app/functions/`)
 
-### `checkin/handler.py` — `POST /checkin` ✅
-Direct tool calls: `create_checkin`, optional `flag_blocker` if blocked field non-empty.
-
-### `agent/handler.py` — `POST /ceremony` ✅
-Strands agent with all 13 tools. 20-turn history cap. Returns `{reply, history}`.
-
 ### `sms/handler.py` — `POST /sms` ✅
-10-step guard chain:
+The only Lambda. Full guard chain:
 1. Twilio signature validation → 403 if invalid
 2. Parse `From` (user_id) + `Body`
 3. `check_message()` → block if empty or >500 chars
@@ -206,40 +204,28 @@ Must be published to a live URL before Twilio A2P review can complete.
 # Live API
 API="https://cbkpntvax6.execute-api.us-east-1.amazonaws.com"
 
-# Check-in
-curl -s -X POST $API/checkin \
-  -H "Content-Type: application/json" \
-  -d '{"user_id":"hamse","did":"built something","doing":"testing","blocked":""}' | python3 -m json.tool
-
-# Ceremony
-curl -s -X POST $API/ceremony \
-  -H "Content-Type: application/json" \
-  -d '{"user_id":"hamse","type":"setup","message":"I want to get set up","history":[]}' | python3 -m json.tool
-
 # Logs
-aws logs tail /aws/lambda/stride-checkin --follow
-aws logs tail /aws/lambda/stride-agent --follow
-aws logs tail /aws/lambda/stride-sms --follow
+make logs-sms                      # tail CloudWatch for stride-sms
 
 # Redeploy
-make deploy                        # build + push + terraform apply
+make deploy                        # build stride-sms image + push to ECR + terraform apply
 make push                          # build + push only (no infra change)
 make up                            # local dev with LocalStack
 ```
 
 ---
 
-## Definition of Done — Sprint 2
+## Definition of Done — Sprint 2 + Consolidation
 
-- [x] All 3 Lambda handlers return real responses (no stubs)
+- [x] stride-sms Lambda handles all user interaction — no stubs
 - [x] SMS opt-in consent flow enforced — no messages sent without YES reply
 - [x] First-time user creates `USER#` record automatically
 - [x] Weekly review tools write real velocity + pattern data
-- [x] 13 tools in `shared/tools.py` — plain language names, no Scrum jargon
+- [x] 19 tools in `shared/tools.py` — plain language names, no Scrum jargon
 - [x] `terraform apply` exits 0 — all resources live in us-east-1
-- [x] Smoke tests pass for `/checkin` and `/ceremony`
-- [x] CloudWatch shows structured JSON logs
-- [x] X-Ray traces present for all 3 functions
+- [x] CloudWatch shows structured JSON logs for stride-sms
+- [x] X-Ray traces present for stride-sms
+- [x] stride-checkin and stride-agent removed — single Lambda architecture
 - [ ] Real SMS round-trip with opt-in flow works end-to-end
 - [ ] Privacy Policy + Terms live at a public URL
 - [ ] A2P Campaign fully approved

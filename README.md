@@ -53,8 +53,6 @@ SMS → Twilio → POST /sms → stride-sms Lambda
 ScrumAgent/
 ├── scrumbot-app/           # Python application code
 │   ├── functions/
-│   │   ├── checkin/        # POST /checkin — direct tool calls
-│   │   ├── agent/          # POST /ceremony — Strands conversational agent
 │   │   └── sms/            # POST /sms — Twilio webhook + full guard chain
 │   ├── shared/
 │   │   ├── tools.py        # 13 Strands @tool functions
@@ -62,18 +60,18 @@ ScrumAgent/
 │   │   ├── models.py       # 8 Pydantic v2 models
 │   │   ├── prompt.py       # STRIDE_SYSTEM_PROMPT — single source of truth
 │   │   └── guards.py       # Message validation + rate limiting
-│   ├── Dockerfile          # Production Lambda image (ARG FUNCTION=checkin|agent|sms)
+│   ├── Dockerfile          # Production Lambda image (ARG FUNCTION=sms)
 │   └── Dockerfile.dev      # Local dev image (Flask, same base as Lambda)
 ├── scrumbot-infra/         # Terraform infrastructure
 │   ├── bootstrap/          # One-time: S3 state bucket + DynamoDB lock table
-│   ├── lambda.tf           # 3 Lambda functions (container image)
-│   ├── api_gateway.tf      # HTTP API — 3 routes
+│   ├── lambda.tf           # stride-sms Lambda (container image)
+│   ├── api_gateway.tf      # HTTP API — POST /sms
 │   ├── dynamodb.tf         # stride-prod table + GSI
-│   ├── ecr.tf              # 3 ECR repos + lifecycle policies
+│   ├── ecr.tf              # stride-sms ECR repo + lifecycle policy
 │   ├── iam.tf              # Lambda exec role + ECR push policy
 │   └── variables.tf        # image_tag, secrets, region, table name
 ├── scripts/
-│   └── build_and_push.sh   # Build all 3 images (linux/arm64) + push to ECR
+│   └── build_and_push.sh   # Build stride-sms image (linux/arm64) + push to ECR
 ├── docker-compose.yml      # Local dev: LocalStack + DynamoDB init + Flask server
 ├── Makefile                # Developer shortcuts
 └── docs/
@@ -89,8 +87,6 @@ ScrumAgent/
 
 | Method | Path | Lambda | Purpose |
 |---|---|---|---|
-| POST | `/checkin` | `stride-checkin` | Daily check-in |
-| POST | `/ceremony` | `stride-agent` | Conversational session |
 | POST | `/sms` | `stride-sms` | Twilio webhook |
 
 ---
@@ -136,7 +132,7 @@ cp scrumbot-infra/terraform.tfvars.example scrumbot-infra/terraform.tfvars
 make deploy
 ```
 
-This runs `build_and_push.sh` (builds all 3 Lambda images for linux/arm64, pushes to ECR) then `terraform apply`.
+This runs `build_and_push.sh` (builds the stride-sms image for linux/arm64, pushes to ECR) then `terraform apply`.
 
 **CI/CD:** On push to `main`, GitHub Actions builds images tagged `sha-{git_sha}`, then runs `terraform apply` with that tag. Requires `AWS_ROLE_ARN`, `ANTHROPIC_API_KEY`, `TWILIO_AUTH_TOKEN`, `TWILIO_ACCOUNT_SID`, `TWILIO_PHONE_NUMBER` as GitHub secrets.
 
@@ -160,9 +156,7 @@ make up          # Start local dev stack (docker compose up --build)
 make down        # Stop and remove volumes
 make build       # Build + push images tagged :latest
 make push        # Build + push images tagged sha-{git short hash}
-make deploy      # push + terraform apply
-make logs-checkin  # Tail CloudWatch for stride-checkin
-make logs-agent    # Tail CloudWatch for stride-agent
+make deploy      # push + terraform apply (builds stride-sms image)
 make logs-sms      # Tail CloudWatch for stride-sms
 ```
 

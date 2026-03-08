@@ -4,8 +4,8 @@
 Python application code for **Stride** — a personal productivity coach for anyone with goals.
 This repo contains: shared library (`shared/`), Lambda handlers (`functions/`).
 
-Sprint 0 notebooks have been deleted. Sprint 1 and Sprint 2 code are complete.
-**Current state: all code locally tested and passing. Next step is AWS deployment.**
+Sprint 0 notebooks have been deleted. Sprint 1, 2, and consolidation are complete.
+**Current state: stride-sms is the only Lambda. stride-checkin and stride-agent have been removed.**
 
 ## What this repo is NOT
 - No Terraform. No infrastructure code. Infrastructure lives in `scrumbot-infra/`.
@@ -31,19 +31,13 @@ Sprint 0 notebooks have been deleted. Sprint 1 and Sprint 2 code are complete.
 ```
 scrumbot-app/
 ├── functions/
-│   ├── checkin/
-│   │   ├── __init__.py
-│   │   └── handler.py      # POST /checkin — direct tool calls, no agent
-│   ├── agent/
-│   │   ├── __init__.py
-│   │   └── handler.py      # POST /ceremony — Strands agent, all 13 tools
 │   └── sms/
 │       ├── __init__.py
 │       └── handler.py      # POST /sms — Twilio webhook, full guard + consent + agent
 ├── shared/
 │   ├── __init__.py
-│   ├── tools.py            # ALL Strands @tool definitions (13 tools) — never inline
-│   ├── db.py               # boto3 client + consent + user bootstrap functions
+│   ├── tools.py            # ALL Strands @tool definitions (19 tools) — never inline
+│   ├── db.py               # boto3 client + consent + user bootstrap + conversation functions
 │   ├── models.py           # Pydantic v2 models — one per DynamoDB entity
 │   ├── prompt.py           # STRIDE_SYSTEM_PROMPT — single source of truth
 │   └── guards.py           # check_message(), check_rate_limit()
@@ -104,6 +98,8 @@ This pattern is the only acceptable way to handle the local/Lambda endpoint diff
 | SMS Consent | `USER#{user_id}` | `CONSENT#SMS` | — | — |
 | Rate limit | `USER#{user_id}` | `RATELIMIT#{YYYY-MM-DD}` | — | — |
 | Blocked log | `USER#{user_id}` | `BLOCKED#{iso_timestamp}` | — | — |
+| Conversation | `USER#{user_id}` | `CONVERSATION#CURRENT` | — | — |
+| Feedback | `USER#{user_id}` | `FEEDBACK#{iso_timestamp}` | — | — |
 
 **GSI name:** `gsi1`
 **GSI attributes:** `gsi1pk` (String), `gsi1sk` (String), projection ALL
@@ -131,13 +127,14 @@ Never use Scan. Every read must be a `get_item` or `query` using PK or GSI.
 
 ## Stride tools (shared/tools.py)
 
-**13 tools total.** All follow the same patterns (Powertools logger, try/except → return dict).
+**19 tools total.** All follow the same patterns (Powertools logger, try/except → return dict).
 
 | Tool | Purpose |
 |---|---|
-| `create_project` | Create a new project for a user |
+| `create_project` | Create a new project for a user (with optional target_date) |
+| `update_project` | Update project name, description, or target_date |
 | `create_work_cycle` | Create a new work cycle (week) under a project |
-| `list_active_projects` | List all projects + their active cycle |
+| `list_active_projects` | List all projects + their active cycle + target_date |
 | `create_task` | Add a task to a work cycle (S/M/L/XL estimate) |
 | `update_task_status` | Move a task to todo / in_progress / done / blocked |
 | `get_cycle_data` | Get a work cycle + all its tasks |
@@ -148,19 +145,17 @@ Never use Scan. Every read must be a `get_item` or `query` using PK or GSI.
 | `record_velocity` | Write pace result after a cycle ends (planned vs delivered) |
 | `update_user_patterns` | Update rolling averages after a weekly review |
 | `complete_onboarding` | Mark a user as onboarded after first project + cycle + task created |
+| `set_user_preference` | Set timezone, checkin_time, evening_time, or planning_day |
+| `create_habit` | Create a recurring habit (daily / weekdays / 3x_week / weekly) |
+| `complete_habit` | Mark a habit done for today |
+| `list_habits` | List all habits with streak + done-today status |
+| `submit_feedback` | Store agent-prompted user feedback |
 
 **Estimate model:**
 - S → 2 points (a few hours)
 - M → 5 points (a day or two)
 - L → 8 points (most of the week)
 - XL → 13 points (more than a week — flag as scope risk)
-
-**Session types (POST /ceremony `type` field):**
-- `setup` — first-time onboarding
-- `planning` — plan your week
-- `checkin` — daily check-in
-- `review` — weekly review
-- `refinement` — adjust your plan
 
 **Critical:** `update_user_patterns` stores `avg_pace` and `avg_completion_rate` as
 `Decimal` (not `float`) before writing to DynamoDB. Python `float` raises `TypeError`
@@ -185,6 +180,13 @@ at write time. Always use `Decimal(str(value))` for float fields going to Dynamo
 **User bootstrap:**
 - `get_or_create_user(user_id, phone)` — get or create USER#METADATA record, race-safe
 - `set_onboarded(user_id)` — sets onboarded=True on USER#METADATA, returns bool
+
+**Conversation:**
+- `get_conversation(user_id)` — loads `CONVERSATION#CURRENT` item (list of message dicts)
+- `save_conversation(user_id, messages)` — writes capped (20-turn), tool-stripped history
+
+**Feedback:**
+- `store_feedback(user_id, body, source)` — writes `FEEDBACK#{iso}` record
 
 ---
 
@@ -243,7 +245,7 @@ def handler(event: dict, context: LambdaContext) -> dict:
 
 No bare `logging`. No `print()`. No handler without both decorators.
 
-**Agent instantiation pattern** (used in `functions/agent/handler.py` and `functions/sms/handler.py`):
+**Agent instantiation pattern** (used in `functions/sms/handler.py`):
 ```python
 from strands import Agent
 from strands.models.anthropic import AnthropicModel

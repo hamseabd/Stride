@@ -1,5 +1,5 @@
 locals {
-  ecr_repos = ["stride-checkin", "stride-agent", "stride-sms"]
+  ecr_repos = ["stride-sms"]
 }
 
 resource "aws_ecr_repository" "stride" {
