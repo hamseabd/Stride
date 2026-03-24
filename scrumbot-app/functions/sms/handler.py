@@ -1,9 +1,10 @@
+import base64
 import os
 from urllib.parse import parse_qs
 
 from aws_lambda_powertools import Logger, Tracer
 from aws_lambda_powertools.utilities.typing import LambdaContext
-from aws_lambda_powertools.event_handler import APIGatewayHttpResolver
+from aws_lambda_powertools.event_handler import APIGatewayHttpResolver, Response
 from twilio.request_validator import RequestValidator
 from twilio.twiml.messaging_response import MessagingResponse
 from strands import Agent
@@ -14,9 +15,11 @@ from shared.guards import check_message, check_rate_limit
 from shared.db import (
     log_blocked_attempt,
     get_consent, record_consent, revoke_consent,
+    record_proactive_consent, revoke_proactive_consent,
     get_or_create_user,
     get_conversation, save_conversation,
     store_feedback,
+    get_latest_outbound, set_outbound_replied,
 )
 from shared.tools import (
     create_project, update_project, create_work_cycle, list_active_projects,
@@ -94,7 +97,7 @@ Onboarding sequence:
 5. One more task: "Anything else this week, or is that the focus?"
 6. "Any daily habits you want to build — like writing, exercise, or reading?" — use create_habit if yes.
 7. Call complete_onboarding.
-8. Explain the rhythm in one message: "Here's how we work: Monday I'll help you plan, we check in daily, and Friday we review. Text me anytime."
+8. Explain the rhythm: "Here's how we work: Monday I'll help you plan, we check in daily, and Friday we review. Want me to send you daily check-ins? Reply REMIND ME anytime."
 
 Keep each reply under 160 chars if possible — aim for 1 SMS segment per message.
 Never mention 'points', 'sprints', or 'stories'.
@@ -126,6 +129,14 @@ HABITS — separate from goals:
 """
 
 
+def _get_body(event: dict) -> str:
+    """Decode the event body, handling API Gateway v2 base64 encoding."""
+    raw = event.get("body", "")
+    if event.get("isBase64Encoded"):
+        return base64.b64decode(raw).decode()
+    return raw
+
+
 def _validate_twilio(event: dict) -> bool:
     """Validate that the request genuinely came from Twilio."""
     auth_token = os.environ.get("TWILIO_AUTH_TOKEN", "")
@@ -134,7 +145,8 @@ def _validate_twilio(event: dict) -> bool:
         return True
 
     validator = RequestValidator(auth_token)
-    signature = event.get("headers", {}).get("X-Twilio-Signature", "")
+    headers = event.get("headers", {})
+    signature = headers.get("x-twilio-signature", "") or headers.get("X-Twilio-Signature", "")
     url = (
         "https://"
         + event.get("requestContext", {}).get("domainName", "")
@@ -142,7 +154,7 @@ def _validate_twilio(event: dict) -> bool:
     )
     params = {
         k: v[0] if isinstance(v, list) else v
-        for k, v in parse_qs(event.get("body", "")).items()
+        for k, v in parse_qs(_get_body(event)).items()
     }
     return validator.validate(url, params, signature)
 
@@ -161,11 +173,11 @@ def _twiml(text: str) -> dict:
         text = truncated[: last_period + 1] if last_period > 0 else truncated
     response = MessagingResponse()
     response.message(text)
-    return {
-        "statusCode": 200,
-        "headers": {"Content-Type": "text/xml"},
-        "body": str(response),
-    }
+    return Response(
+        status_code=200,
+        content_type="text/xml",
+        body=str(response),
+    )
 
 
 def _call_agent(user_id: str, message: str, is_new_user: bool, user: dict) -> str:
@@ -218,10 +230,10 @@ def sms():
     # 1. Twilio signature validation
     if not _validate_twilio(event):
         logger.warning("Invalid Twilio signature")
-        return {"statusCode": 403, "body": "Forbidden"}
+        return Response(status_code=403, content_type="text/plain", body="Forbidden")
 
     # 2. Parse fields
-    body    = parse_qs(event.get("body", ""))
+    body    = parse_qs(_get_body(event))
     user_id = body.get("From", ["unknown"])[0]
     message = body.get("Body", [""])[0].strip()
 
@@ -242,9 +254,10 @@ def sms():
 
     msg_upper = message.upper().strip()
 
-    # 5. STOP keyword — revoke consent immediately
+    # 5. STOP keyword — revoke ALL consent immediately
     if msg_upper == "STOP":
         revoke_consent(user_id)
+        revoke_proactive_consent(user_id)
         logger.info("User unsubscribed", user_id=user_id)
         return _twiml(_UNSUBSCRIBED)
 
@@ -273,6 +286,22 @@ def sms():
             # No consent yet — send opt-in prompt
             logger.info("Sending opt-in prompt", user_id=user_id)
             return _twiml(_OPT_IN_PROMPT)
+
+    # 7.5. REMIND ME / NO REMINDERS — proactive consent (requires SMS consent)
+    if msg_upper == "REMIND ME":
+        record_proactive_consent(user_id)
+        logger.info("Proactive consent granted", user_id=user_id)
+        return _twiml("You'll get daily check-ins! Reply NO REMINDERS to stop.")
+
+    if msg_upper == "NO REMINDERS":
+        revoke_proactive_consent(user_id)
+        logger.info("Proactive consent revoked", user_id=user_id)
+        return _twiml("Got it \u2014 no more reminders. Text me anytime.")
+
+    # 7.6. Track replied_at on latest outbound (for tone derivation)
+    latest_out = get_latest_outbound(user_id)
+    if latest_out and not latest_out.get("replied_at"):
+        set_outbound_replied(user_id, latest_out["sk"])
 
     # 8. User bootstrap
     user = get_or_create_user(user_id=user_id, phone=user_id)

@@ -16,7 +16,7 @@ aws ecr get-login-password --region "${AWS_REGION}" \
   | docker login --username AWS --password-stdin "${REGISTRY}"
 
 # Build and push each function
-for FUNCTION in sms; do
+for FUNCTION in sms scheduler; do
   IMAGE="${REGISTRY}/stride-${FUNCTION}"
 
   echo "→ Building stride-${FUNCTION}..."

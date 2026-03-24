@@ -10,7 +10,7 @@ Bugs discovered during code review. Each entry includes the exact fix and which 
 **Severity:** Medium — silent data loss, no crash
 **When it bites:** Phase 2, the moment tone adaptation starts writing `preferred_tone != "balanced"`
 **Fix ships in:** Phase 2 (first thing, before any tone work)
-**Status:** ⏳ Not yet fixed
+**Status:** ✅ Fixed (2026-03-05, Phase 2)
 
 ### Root cause
 
@@ -83,4 +83,4 @@ No other changes. No model changes needed — `preferred_tone` already exists on
 
 ---
 
-*No other known bugs at time of writing (2026-03-03).*
+*No known open bugs as of 2026-03-12.*

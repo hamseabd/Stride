@@ -1,7 +1,10 @@
 # Terms of Service
 
+> **Note:** This markdown version is superseded by the live HTML version at
+> http://stride-productivity-site.s3-website-us-east-1.amazonaws.com/terms-of-service.html
+
 **Stride**
-Last updated: February 27, 2026
+Last updated: March 9, 2026
 
 ---
 
@@ -10,8 +13,8 @@ Last updated: February 27, 2026
 By signing up for or using Stride, you agree to these Terms of Service
 ("Terms"). If you do not agree, do not use the service.
 
-Stride is operated by [YOUR NAME / BUSINESS NAME] ("we", "us", or "our").
-Contact us at: [YOUR EMAIL]
+Stride is operated by Stride ("we", "us", or "our").
+Contact us at: strideproductivity@gmail.com
 
 ---
 
@@ -37,13 +40,13 @@ confirm that you meet this requirement.
 ## 4. SMS Messaging Terms
 
 ### Opt-in
-By providing your phone number and replying YES to our confirmation message,
+By texting START to (404) 948-5133 and replying YES to our confirmation message,
 you consent to receive SMS messages from Stride. This includes daily
-check-in prompts and weekly review summaries.
+check-in prompts, weekly planning messages, and weekly review summaries.
 
 ### Message frequency
-Up to one check-in message per day plus one weekly summary, depending on
-your settings. Message frequency may vary.
+Message frequency varies, typically 1-3 messages per day including daily
+check-in prompts, weekly planning messages, and weekly review summaries.
 
 ### Message and data rates
 Standard message and data rates from your mobile carrier may apply. Stride
@@ -55,7 +58,7 @@ receive one final confirmation message. No further messages will be sent
 unless you re-enrol.
 
 ### Help
-Reply **HELP** to any Stride message or email [YOUR EMAIL] for support.
+Reply **HELP** to any Stride message or email strideproductivity@gmail.com for support.
 
 ### Supported carriers
 Stride supports all major US carriers. Carrier support is not guaranteed
@@ -164,9 +167,9 @@ expenses arising from your use of Stride or your violation of these Terms.
 
 ## 14. Governing Law
 
-These Terms are governed by the laws of [YOUR STATE / COUNTRY], without
+These Terms are governed by the laws of the State of Georgia, United States, without
 regard to conflict of law principles. Any disputes will be resolved in the
-courts of [YOUR STATE / COUNTRY].
+courts of the State of Georgia, United States.
 
 ---
 
@@ -182,8 +185,8 @@ of Stride after changes means you accept the updated Terms.
 
 For questions about these Terms:
 
-**Email:** [YOUR EMAIL]
-**Website:** [YOUR WEBSITE URL]
+**Email:** strideproductivity@gmail.com
+**Website:** https://stride-productivity-site.s3.amazonaws.com/index.html
 
 ---
 

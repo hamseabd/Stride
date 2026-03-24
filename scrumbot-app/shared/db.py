@@ -122,6 +122,212 @@ def revoke_consent(user_id: str) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# Proactive consent (TCPA — separate from inbound SMS consent)
+# ---------------------------------------------------------------------------
+
+def get_proactive_consent(user_id: str) -> dict | None:
+    """
+    Return the CONSENT#PROACTIVE record for a user, or None if not found.
+    Returns None on error (fail open).
+    """
+    try:
+        resp = get_table().get_item(
+            Key={"pk": f"USER#{user_id}", "sk": "CONSENT#PROACTIVE"}
+        )
+        return resp.get("Item")
+    except Exception as e:
+        logger.error("get_proactive_consent failed", error=str(e), user_id=user_id)
+        return None
+
+
+def record_proactive_consent(user_id: str) -> bool:
+    """
+    Write CONSENT#PROACTIVE with status=active and GSI keys for scheduler lookup.
+    GSI1: gsi1pk="PROACTIVE#ACTIVE", gsi1sk="USER#{user_id}"
+    Returns True on success, False on error.
+    """
+    now = datetime.now(timezone.utc).isoformat() + "Z"
+    try:
+        get_table().put_item(Item={
+            "pk": f"USER#{user_id}",
+            "sk": "CONSENT#PROACTIVE",
+            "status": "active",
+            "gsi1pk": "PROACTIVE#ACTIVE",
+            "gsi1sk": f"USER#{user_id}",
+            "consented_at": now,
+            "created_at": now,
+        })
+        logger.info("Proactive consent recorded", user_id=user_id)
+        return True
+    except Exception as e:
+        logger.error("record_proactive_consent failed", error=str(e), user_id=user_id)
+        return False
+
+
+def revoke_proactive_consent(user_id: str) -> bool:
+    """
+    Set status=revoked on CONSENT#PROACTIVE and remove GSI keys.
+    Returns True on success, False on error.
+    """
+    now = datetime.now(timezone.utc).isoformat() + "Z"
+    try:
+        get_table().update_item(
+            Key={"pk": f"USER#{user_id}", "sk": "CONSENT#PROACTIVE"},
+            UpdateExpression="SET #s = :revoked, revoked_at = :now REMOVE gsi1pk, gsi1sk",
+            ExpressionAttributeNames={"#s": "status"},
+            ExpressionAttributeValues={":revoked": "revoked", ":now": now},
+        )
+        logger.info("Proactive consent revoked", user_id=user_id)
+        return True
+    except Exception as e:
+        logger.error("revoke_proactive_consent failed", error=str(e), user_id=user_id)
+        return False
+
+
+def get_consented_users() -> list[str]:
+    """
+    Query GSI for all users with active proactive consent.
+    Returns list of user_id strings (e.g. ["+15551234567", ...]).
+    Returns empty list on error (fail open).
+    """
+    try:
+        from boto3.dynamodb.conditions import Key
+        resp = get_table().query(
+            IndexName="gsi1",
+            KeyConditionExpression=Key("gsi1pk").eq("PROACTIVE#ACTIVE"),
+        )
+        items = resp.get("Items", [])
+        # Extract user_id from pk: "USER#+15551234567" → "+15551234567"
+        return [item["pk"].removeprefix("USER#") for item in items]
+    except Exception as e:
+        logger.error("get_consented_users failed", error=str(e))
+        return []
+
+
+# ---------------------------------------------------------------------------
+# Outbound message logging
+# ---------------------------------------------------------------------------
+
+def log_outbound(user_id: str, body: str, message_type: str) -> str | None:
+    """
+    Log an outbound proactive message.
+    DynamoDB: USER#{user_id} / OUTBOUND#{iso_timestamp}
+    Returns the SK on success (for replied_at tracking), None on error.
+    """
+    now = datetime.now(timezone.utc).isoformat() + "Z"
+    sk = f"OUTBOUND#{now}"
+    try:
+        get_table().put_item(Item={
+            "pk": f"USER#{user_id}",
+            "sk": sk,
+            "body": body,
+            "message_type": message_type,
+            "sent_at": now,
+        })
+        logger.info("Outbound logged", user_id=user_id, message_type=message_type)
+        return sk
+    except Exception as e:
+        logger.error("log_outbound failed", error=str(e), user_id=user_id)
+        return None
+
+
+def get_latest_outbound(user_id: str) -> dict | None:
+    """
+    Get the most recent OUTBOUND# record for a user.
+    Returns the item dict or None.
+    """
+    try:
+        from boto3.dynamodb.conditions import Key
+        resp = get_table().query(
+            KeyConditionExpression=Key("pk").eq(f"USER#{user_id}") & Key("sk").begins_with("OUTBOUND#"),
+            ScanIndexForward=False,
+            Limit=1,
+        )
+        items = resp.get("Items", [])
+        return items[0] if items else None
+    except Exception as e:
+        logger.error("get_latest_outbound failed", error=str(e), user_id=user_id)
+        return None
+
+
+def set_outbound_replied(user_id: str, outbound_sk: str) -> bool:
+    """
+    Set replied_at on an outbound record (for tone derivation latency tracking).
+    Returns True on success, False on error.
+    """
+    now = datetime.now(timezone.utc).isoformat() + "Z"
+    try:
+        get_table().update_item(
+            Key={"pk": f"USER#{user_id}", "sk": outbound_sk},
+            UpdateExpression="SET replied_at = :now",
+            ExpressionAttributeValues={":now": now},
+        )
+        return True
+    except Exception as e:
+        logger.error("set_outbound_replied failed", error=str(e), user_id=user_id)
+        return False
+
+
+def get_todays_outbound(user_id: str, date_str: str) -> list[dict]:
+    """
+    Get all outbound records for a user on a given date (for deduplication).
+    date_str: "YYYY-MM-DD" in user's local timezone.
+    Returns list of outbound items, empty list on error.
+    """
+    try:
+        from boto3.dynamodb.conditions import Key
+        resp = get_table().query(
+            KeyConditionExpression=(
+                Key("pk").eq(f"USER#{user_id}")
+                & Key("sk").begins_with(f"OUTBOUND#{date_str}")
+            ),
+        )
+        return resp.get("Items", [])
+    except Exception as e:
+        logger.error("get_todays_outbound failed", error=str(e), user_id=user_id)
+        return []
+
+
+def get_outbound_since(user_id: str, since_date: str) -> list[dict]:
+    """
+    Get all outbound records for a user since a given date (inclusive).
+    since_date: "YYYY-MM-DD"
+    Returns list of outbound items, empty list on error.
+    """
+    try:
+        from boto3.dynamodb.conditions import Key
+        resp = get_table().query(
+            KeyConditionExpression=(
+                Key("pk").eq(f"USER#{user_id}")
+                & Key("sk").between(f"OUTBOUND#{since_date}", "OUTBOUND#9999")
+            ),
+        )
+        return resp.get("Items", [])
+    except Exception as e:
+        logger.error("get_outbound_since failed", error=str(e), user_id=user_id)
+        return []
+
+
+def update_preferred_tone(user_id: str, tone: str) -> bool:
+    """
+    Update preferred_tone on the PATTERN#AGGREGATE record.
+    tone: "direct" | "encouraging" | "balanced"
+    Returns True on success, False on error.
+    """
+    try:
+        get_table().update_item(
+            Key={"pk": f"USER#{user_id}", "sk": "PATTERN#AGGREGATE"},
+            UpdateExpression="SET preferred_tone = :tone",
+            ExpressionAttributeValues={":tone": tone},
+        )
+        logger.info("Preferred tone updated", user_id=user_id, tone=tone)
+        return True
+    except Exception as e:
+        logger.error("update_preferred_tone failed", error=str(e), user_id=user_id)
+        return False
+
+
+# ---------------------------------------------------------------------------
 # User bootstrap
 # ---------------------------------------------------------------------------
 
@@ -255,7 +461,23 @@ def get_conversation(user_id: str) -> list:
             return []
 
         messages_json = item.get("messages", "[]")
-        return json.loads(messages_json) if isinstance(messages_json, str) else messages_json
+        loaded = json.loads(messages_json) if isinstance(messages_json, str) else messages_json
+
+        # Validate: strip any orphaned tool_result messages at the start
+        # (tool_result without a preceding assistant tool_use causes API 400)
+        tool_result_types = {"toolResult", "tool_result"}
+        validated = []
+        for msg in loaded:
+            if not isinstance(msg, dict):
+                continue
+            role = msg.get("role", "")
+            content = msg.get("content", [])
+            if role == "user" and isinstance(content, list) and all(
+                isinstance(c, dict) and c.get("type") in tool_result_types for c in content
+            ):
+                continue  # drop orphaned tool_result messages
+            validated.append(msg)
+        return validated
     except Exception as e:
         logger.error("get_conversation failed — returning empty", error=str(e), user_id=user_id)
         return []
@@ -270,6 +492,9 @@ def save_conversation(user_id: str, messages: list, planning_day: int = 1, user_
     Returns True on success, False on error.
     """
     try:
+        tool_types_result = {"toolResult", "tool_result"}
+        tool_types_use = {"toolUse", "tool_use"}
+
         stripped = []
         for msg in messages:
             if isinstance(msg, dict):
@@ -277,14 +502,14 @@ def save_conversation(user_id: str, messages: list, planning_day: int = 1, user_
                 if role == "user":
                     content = msg.get("content", [])
                     if isinstance(content, list) and all(
-                        isinstance(c, dict) and c.get("type") == "toolResult" for c in content
+                        isinstance(c, dict) and c.get("type") in tool_types_result for c in content
                     ):
                         continue
                     stripped.append(msg)
                 elif role == "assistant":
                     content = msg.get("content", [])
                     if isinstance(content, list):
-                        text_only = [c for c in content if isinstance(c, dict) and c.get("type") != "toolUse"]
+                        text_only = [c for c in content if not (isinstance(c, dict) and c.get("type") in tool_types_use)]
                         if text_only:
                             stripped.append({"role": "assistant", "content": text_only})
                     elif isinstance(content, str):

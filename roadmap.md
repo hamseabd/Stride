@@ -167,7 +167,7 @@ curl localhost:8000/test-scheduler
 | **Sprint 4** | Team Version | After beta | ~14 days | — |
 | **Sprint 5** | Payments (Stripe) | After team validated | ~10 days | — |
 
-**Known bugs:** 1 — see `bugfix.md`. BUG-001 must be fixed as the first step of Phase 2.
+**Known bugs:** 0 — BUG-001 fixed in Phase 2. See `bugfix.md`.
 
 ### Phase 0 — Pre-Build Fixes ✅ DONE
 

@@ -31,7 +31,7 @@ SMS → Twilio → POST /sms → stride-sms Lambda
                               ↓
                          Strands Agent (Claude claude-sonnet-4-6)
                               ↓
-                         13 tools → DynamoDB (stride-prod)
+                         19 tools → DynamoDB (stride-prod)
 ```
 
 | Component | Choice |
@@ -55,9 +55,9 @@ ScrumAgent/
 │   ├── functions/
 │   │   └── sms/            # POST /sms — Twilio webhook + full guard chain
 │   ├── shared/
-│   │   ├── tools.py        # 13 Strands @tool functions
-│   │   ├── db.py           # DynamoDB client, consent, rate limit, user bootstrap
-│   │   ├── models.py       # 8 Pydantic v2 models
+│   │   ├── tools.py        # 19 Strands @tool functions
+│   │   ├── db.py           # DynamoDB client, consent, rate limit, user bootstrap, conversation, feedback
+│   │   ├── models.py       # 9 Pydantic v2 models (incl. Habit)
 │   │   ├── prompt.py       # STRIDE_SYSTEM_PROMPT — single source of truth
 │   │   └── guards.py       # Message validation + rate limiting
 │   ├── Dockerfile          # Production Lambda image (ARG FUNCTION=sms)
@@ -71,12 +71,13 @@ ScrumAgent/
 │   ├── iam.tf              # Lambda exec role + ECR push policy
 │   └── variables.tf        # image_tag, secrets, region, table name
 ├── scripts/
-│   └── build_and_push.sh   # Build stride-sms image (linux/arm64) + push to ECR
+│   ├── build_and_push.sh   # Build stride-sms image (linux/arm64) + push to ECR
+│   └── deploy_site.sh      # Sync site HTML to S3 bucket
 ├── docker-compose.yml      # Local dev: LocalStack + DynamoDB init + Flask server
 ├── Makefile                # Developer shortcuts
 └── docs/
     ├── status.md           # Project status tracker
-    └── legal/              # Privacy policy + Terms of service
+    └── legal/              # Privacy policy + Terms of service (superseded by HTML site)
 ```
 
 ---
@@ -152,12 +153,17 @@ Users opt in by replying YES to the first message. STOP unsubscribes immediately
 ## Makefile targets
 
 ```bash
-make up          # Start local dev stack (docker compose up --build)
-make down        # Stop and remove volumes
-make build       # Build + push images tagged :latest
-make push        # Build + push images tagged sha-{git short hash}
-make deploy      # push + terraform apply (builds stride-sms image)
+make up            # Start local dev stack (docker compose up --build)
+make down          # Stop and remove volumes
+make test          # Run test suite (104 tests)
+make chat          # Interactive SMS simulator (chat.py)
+make build         # Build + push images tagged :latest
+make push          # Build + push images tagged sha-{git short hash}
+make deploy        # push + terraform apply (builds stride-sms image)
+make deploy-site   # Sync site HTML to S3
 make logs-sms      # Tail CloudWatch for stride-sms
+make feedback      # Scan all feedback entries (dev tool)
+make feedback-user USER=+1... # Query one user's feedback
 ```
 
 ---
@@ -176,6 +182,9 @@ One table, no joins. All data accessed by `pk` + `sk` or via `gsi1`.
 | Blocker | `TASK#{task_id}` | `BLOCKER#{blocker_id}` |
 | Velocity | `PROJECT#{project_id}` | `VELOCITY#{cycle_id}` |
 | Pattern | `USER#{user_id}` | `PATTERN#AGGREGATE` |
+| Habit | `USER#{user_id}` | `HABIT#{habit_id}` |
 | SMS consent | `USER#{user_id}` | `CONSENT#SMS` |
 | Rate limit | `USER#{user_id}` | `RATELIMIT#{YYYY-MM-DD}` |
 | Blocked log | `USER#{user_id}` | `BLOCKED#{iso_timestamp}` |
+| Conversation | `USER#{user_id}` | `CONVERSATION#CURRENT` |
+| Feedback | `USER#{user_id}` | `FEEDBACK#{iso_timestamp}` |

@@ -81,8 +81,8 @@ pattern = UserPattern(
 ```
 
 ### Checklist — 2.1
-- [ ] Add `existing_tone` read from DynamoDB record
-- [ ] Pass `preferred_tone=existing_tone` to constructor
+- [x] Add `existing_tone` read from DynamoDB record
+- [x] Pass `preferred_tone=existing_tone` to constructor
 
 ---
 
@@ -266,17 +266,17 @@ code paths). `make feedback-user` uses a query and is production-safe for debugg
 Add `feedback` and `feedback-user` to the `.PHONY` line.
 
 ### Checklist — 2.2
-- [ ] Add `store_feedback()` to `shared/db.py`
-- [ ] Add `submit_feedback` tool to `shared/tools.py`
-- [ ] Import `store_feedback` in `functions/sms/handler.py`
-- [ ] Add FEEDBACK keyword handler in guard chain (step 6.5)
-- [ ] Add `submit_feedback` to TOOLS import + list in `sms/handler.py`
-- [ ] Add `submit_feedback` to TOOLS import + list in `agent/handler.py`
-- [ ] Add `TABLE` variable to Makefile
-- [ ] Add `feedback` and `feedback-user` targets to Makefile
-- [ ] Add both to `.PHONY`
-- [ ] Test: text `FEEDBACK this is a test`, confirm stored in DynamoDB
-- [ ] Test: `make feedback-user USER=+15551234567` shows the entry
+- [x] Add `store_feedback()` to `shared/db.py`
+- [x] Add `submit_feedback` tool to `shared/tools.py`
+- [x] Import `store_feedback` in `functions/sms/handler.py`
+- [x] Add FEEDBACK keyword handler in guard chain (step 6.5)
+- [x] Add `submit_feedback` to TOOLS import + list in `sms/handler.py`
+- [x] Add `submit_feedback` to TOOLS import + list in `agent/handler.py`
+- [x] Add `TABLE` variable to Makefile
+- [x] Add `feedback` and `feedback-user` targets to Makefile
+- [x] Add both to `.PHONY`
+- [x] Test: text `FEEDBACK this is a test`, confirm stored in DynamoDB
+- [x] Test: `make feedback-user USER=+15551234567` shows the entry
 
 ---
 
@@ -306,8 +306,8 @@ _HELP_TEXT = (
 ```
 
 ### Checklist — 2.3
-- [ ] Replace `_HELP_TEXT` in `sms/handler.py`
-- [ ] Verify char count stays under 320
+- [x] Replace `_HELP_TEXT` in `sms/handler.py`
+- [x] Verify char count stays under 320
 
 ---
 
@@ -357,8 +357,8 @@ Never mention 'points', 'sprints', or 'stories'.
 ```
 
 ### Checklist — 2.4
-- [ ] Replace `_ONBOARDING_ADDENDUM` in `sms/handler.py`
-- [ ] Test via `chat.py`: fresh user → verify onboarding is one question at a time
+- [x] Replace `_ONBOARDING_ADDENDUM` in `sms/handler.py`
+- [x] Test via `chat.py`: fresh user → verify onboarding is one question at a time
 
 ---
 
@@ -384,9 +384,9 @@ Phase 3 will add: `OutboundLog` entity, `replied_at` tracking, and a heuristic t
 `preferred_tone` in UserPattern every 2 weeks based on engagement signals.
 
 ### Checklist — 2.5
-- [ ] BUG-001 fix applied (covered in 2.1)
-- [ ] Confirm system prompt injection is in place (already done, verify it reads from `user` dict)
-- [ ] No other tone code in Phase 2
+- [x] BUG-001 fix applied (covered in 2.1)
+- [x] Confirm system prompt injection is in place (already done, verify it reads from `user` dict)
+- [x] No other tone code in Phase 2
 
 ---
 
@@ -503,10 +503,10 @@ curl "localhost:8000/test-scheduler?send=true"
 the actual outbound SMS helper (`shared/sms.py`) when `send=true`.
 
 ### Checklist — 2.6
-- [ ] Add `/test-scheduler` route to `local_server.py`
-- [ ] Test: `curl localhost:8000/test-scheduler | jq .` returns user list with `message_type`
-- [ ] Test: `?user=+15551234567` filters correctly
-- [ ] Verify timezone math: user in PST at 9am shows `morning_reminder` if Tuesday-Thursday
+- [x] Add `/test-scheduler` route to `local_server.py`
+- [x] Test: `curl localhost:8000/test-scheduler | jq .` returns user list with `message_type`
+- [x] Test: `?user=+15551234567` filters correctly
+- [x] Verify timezone math: user in PST at 9am shows `morning_reminder` if Tuesday-Thursday
 
 ---
 
@@ -527,14 +527,14 @@ the actual outbound SMS helper (`shared/sms.py`) when `send=true`.
 
 ## Definition of Done — Phase 2
 
-- [ ] `make feedback-user USER=+15551234567` returns stored feedback after texting `FEEDBACK ...`
-- [ ] `make feedback` returns all users' feedback entries
-- [ ] Agent calls `submit_feedback` after weekly review when user provides feedback
-- [ ] HELP response fits in 2 SMS segments and includes FEEDBACK keyword instructions
-- [ ] Fresh user onboarding via `chat.py` goes one question at a time — no walls of text
-- [ ] After onboarding, agent explains Monday plan / daily check-in / Friday review rhythm
-- [ ] `preferred_tone` is preserved after `update_user_patterns` (BUG-001 fixed)
-- [ ] `curl localhost:8000/test-scheduler` returns user list with correct timezone math
+- [x] `make feedback-user USER=+15551234567` returns stored feedback after texting `FEEDBACK ...`
+- [x] `make feedback` returns all users' feedback entries
+- [x] Agent calls `submit_feedback` after weekly review when user provides feedback
+- [x] HELP response fits in 2 SMS segments and includes FEEDBACK keyword instructions
+- [x] Fresh user onboarding via `chat.py` goes one question at a time — no walls of text
+- [x] After onboarding, agent explains Monday plan / daily check-in / Friday review rhythm
+- [x] `preferred_tone` is preserved after `update_user_patterns` (BUG-001 fixed)
+- [x] `curl localhost:8000/test-scheduler` returns user list with correct timezone math
 
 ---
 

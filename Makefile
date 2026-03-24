@@ -1,4 +1,4 @@
-.PHONY: up down build push deploy test chat logs-sms feedback feedback-user
+.PHONY: up down build push deploy test chat logs-sms logs-scheduler feedback feedback-user deploy-site
 
 # ── Config ────────────────────────────────────────────────────────────────────
 TABLE ?= stride-prod
@@ -32,6 +32,9 @@ deploy: push
 logs-sms:
 	aws logs tail /aws/lambda/stride-sms --follow
 
+logs-scheduler:
+	aws logs tail /aws/lambda/stride-scheduler --follow
+
 # ── Feedback (dev tool — scan is acceptable here, not a Lambda path) ──────────
 feedback:
 	aws dynamodb scan \
@@ -49,3 +52,12 @@ feedback-user:
 	  --expression-attribute-values '{":pk":{"S":"USER#$(USER)"},":f":{"S":"FEEDBACK#"}}' \
 	  --query "Items[*].{body:body.S,source:source.S,at:created_at.S}" \
 	  --output table
+
+# ── Site ──────────────────────────────────────────────────────────────────────
+deploy-site:
+	cd scrumbot-infra && terraform apply -auto-approve \
+	  -target=aws_s3_bucket.site \
+	  -target=aws_s3_bucket_website_configuration.site \
+	  -target=aws_s3_bucket_public_access_block.site \
+	  -target=aws_s3_bucket_policy.site
+	bash scripts/deploy_site.sh

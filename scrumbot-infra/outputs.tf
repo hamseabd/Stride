@@ -22,3 +22,18 @@ output "ecr_sms_url" {
   description = "ECR repository URL for stride-sms"
   value       = aws_ecr_repository.stride["stride-sms"].repository_url
 }
+
+output "scheduler_function_name" {
+  description = "Name of the stride-scheduler Lambda function"
+  value       = module.lambda_scheduler.lambda_function_name
+}
+
+output "ecr_scheduler_url" {
+  description = "ECR repository URL for stride-scheduler"
+  value       = aws_ecr_repository.stride["stride-scheduler"].repository_url
+}
+
+output "site_url" {
+  description = "S3 website URL for the Stride site"
+  value       = "http://${aws_s3_bucket_website_configuration.site.website_endpoint}"
+}

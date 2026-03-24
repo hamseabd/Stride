@@ -1,5 +1,5 @@
 # Stride — Project Status
-Last updated: 2026-03-07
+Last updated: 2026-03-12
 
 ---
 
@@ -20,9 +20,13 @@ users never see it. Plain language only.
 | **Sprint 0** | ✅ Done | Jupyter notebooks — proved Strands agent + tools + DynamoDB |
 | **Sprint 1** | ✅ Done | Renamed to Stride, Terraform written, Lambda stubs, SMS migration |
 | **Sprint 2** | ✅ Done | Real handlers, consent flow, onboarding, all 3 endpoints live |
-| **Sprint 3** | ⏳ Not started | Auth, Secrets Manager, proactive outbound SMS, pattern auto-update |
+| **Sprint 3 Phase 0** | ✅ Done | Pre-build fixes (target_date, update_project, set_user_preference, max_tokens) |
+| **Sprint 3 Phase 1** | ✅ Done | Conversation memory, habits, data moat fields, chat.py, 104 tests |
+| **Sprint 3 Phase 2** | ✅ Done | Feedback collection, better onboarding, BUG-001 fix, /test-scheduler scaffold |
+| **Sprint 3 Phase 3** | ✅ Done | Proactive outbound SMS (scheduler Lambda, proactive consent, tone derivation) |
+| **Sprint 3 Phase 4** | ✅ Done | Deploy + smoke test, all Lambdas live |
 
-**Current state:** Deployed. `POST /sms` live at `https://cbkpntvax6.execute-api.us-east-1.amazonaws.com`. stride-checkin and stride-agent removed — stride-sms is the only Lambda.
+**Current state:** Deployed. Two Lambdas live: `stride-sms` (POST /sms) and `stride-scheduler` (EventBridge every 15 min). A2P 10DLC approved. Ready for beta.
 
 ---
 
@@ -32,14 +36,19 @@ users never see it. Plain language only.
 |---|---|---|
 | API Gateway (HTTP) | `stride-api` | ✅ Live |
 | Lambda | `stride-sms` | ✅ Live (256MB / 15s / ARM64) |
+| Lambda | `stride-scheduler` | ✅ Live (256MB / 60s / ARM64) |
+| EventBridge | `stride-scheduler-rule` | ✅ Live (rate: 15 min) |
+| ECR | `stride-scheduler` | ✅ Live |
 | DynamoDB | `stride-prod` | ✅ Live (PAY_PER_REQUEST, PITR on) |
 | ECR | `stride-sms` | ✅ Live (lifecycle: keep last 10 sha- tags) |
 | IAM Role | `stride-lambda-exec` | ✅ Live |
 | S3 | `stride-tf-state` | ✅ Live (Terraform remote state) |
+| S3 | `stride-productivity-site` | ✅ Live (static website — index, privacy, terms) |
 | DynamoDB | `stride-tf-locks` | ✅ Live (Terraform state lock) |
 
 **Deployment method:** Lambda container images (Linux ARM64 / `public.ecr.aws/lambda/python:3.12`)
 **Terraform state:** Remote — S3 + DynamoDB lock
+**Site deploy:** `bash scripts/deploy_site.sh` (syncs `scrumbot-app/site/` to S3)
 
 ---
 
@@ -49,23 +58,29 @@ users never see it. Plain language only.
 |---|---|---|
 | `POST /sms` | `stride-sms` | Twilio webhook — full guard chain + consent + agent |
 
+**Website:**
+- Home: http://stride-productivity-site.s3-website-us-east-1.amazonaws.com/
+- Privacy: http://stride-productivity-site.s3-website-us-east-1.amazonaws.com/privacy-policy.html
+- Terms: http://stride-productivity-site.s3-website-us-east-1.amazonaws.com/terms-of-service.html
+
 ---
 
 ## Shared library (`scrumbot-app/shared/`)
 
 ### `models.py` ✅
-8 Pydantic v2 models covering every DynamoDB entity:
+9 Pydantic v2 models covering every DynamoDB entity:
 
 | Model | Key fields |
 |---|---|
-| `User` | user_id, name, email, phone, onboarded, created_at |
-| `Project` | project_id, user_id, name, description, created_at |
+| `User` | user_id, name, email, phone, onboarded, timezone, checkin_time, evening_time, planning_day |
+| `Project` | project_id, user_id, name, description, target_date, created_at |
 | `WorkCycle` | cycle_id, project_id, name, goal, start_date, end_date, status |
-| `Task` | task_id, cycle_id, title, description, estimate (pts), estimate_label, status |
+| `Task` | task_id, cycle_id, title, description, estimate (pts), estimate_label, status, status_changed_at |
 | `Checkin` | checkin_id, user_id, date, did, doing, blocked, created_at |
-| `Blocker` | blocker_id, task_id, description, resolved, created_at |
-| `Velocity` | cycle_id, project_id, planned_points, delivered_points, cycle_name |
-| `UserPattern` | user_id, avg_pace, avg_completion_rate, common_blockers, cycle_count |
+| `Blocker` | blocker_id, task_id, description, category, resolved, created_at |
+| `Velocity` | cycle_id, project_id, planned_points, delivered_points, cycle_name, active_project_count |
+| `UserPattern` | user_id, avg_pace, avg_completion_rate, common_blockers, cycle_count, preferred_tone |
+| `Habit` | habit_id, user_id, name, frequency, streak, last_completed, created_at |
 
 ### `tools.py` ✅ — 19 tools
 
@@ -106,7 +121,7 @@ users never see it. Plain language only.
 - `check_rate_limit(user_id, limit=50)` — `True` if over daily limit
 
 ### `prompt.py` ✅
-Single-source `STRIDE_SYSTEM_PROMPT`. Covers all 5 session types, estimate rules, plain language rules.
+Single-source `STRIDE_SYSTEM_PROMPT`. Covers all 5 session types, estimate rules, plain language rules. Injects `preferred_tone` per user.
 
 ---
 
@@ -119,10 +134,11 @@ The only Lambda. Full guard chain:
 3. `check_message()` → block if empty or >500 chars
 4. `check_rate_limit()` → block if >50 msgs/day
 5. STOP keyword → revoke consent, unsubscribe reply
-6. HELP keyword → help text, no agent
+6. HELP keyword → help text (includes FEEDBACK instructions), no agent
+6.5. FEEDBACK keyword → `store_feedback()`, instant ack, no consent required
 7. `get_consent()` → no consent: send opt-in prompt; YES reply: record consent + welcome
 8. `get_or_create_user()` → bootstrap `USER#` record
-9. Onboarding check → inject setup instructions if `user.onboarded=False`
+9. Onboarding check → inject setup instructions if `user.onboarded=False` (one question at a time)
 10. Agent call → `_call_agent()`, truncate at 1600 chars at sentence boundary
 
 ---
@@ -143,9 +159,12 @@ The only Lambda. Full guard chain:
 | Blocker | `TASK#{task_id}` | `BLOCKER#{blocker_id}` |
 | Velocity | `PROJECT#{project_id}` | `VELOCITY#{cycle_id}` |
 | Pattern | `USER#{user_id}` | `PATTERN#AGGREGATE` |
+| Habit | `USER#{user_id}` | `HABIT#{habit_id}` |
 | SMS Consent | `USER#{user_id}` | `CONSENT#SMS` |
 | Rate limit | `USER#{user_id}` | `RATELIMIT#{YYYY-MM-DD}` |
 | Blocked log | `USER#{user_id}` | `BLOCKED#{iso_timestamp}` |
+| Conversation | `USER#{user_id}` | `CONVERSATION#CURRENT` |
+| Feedback | `USER#{user_id}` | `FEEDBACK#{iso_timestamp}` |
 
 ---
 
@@ -154,22 +173,23 @@ The only Lambda. Full guard chain:
 | Item | Status |
 |---|---|
 | Repository | ✅ `github.com/hamseabd/Stride` |
-| Latest commit | ✅ `0532304` — container image migration |
 | `.env` / `terraform.tfvars` | ✅ Gitignored (secrets never committed) |
 | `plan.md` | ✅ Gitignored (local planning file) |
 | Local dev files (`chat.py`, `local_server.py`, `requirement-dev.txt`) | ✅ Gitignored |
 
 ---
 
-## Legal / compliance (`docs/legal/`)
+## Legal / compliance
 
 | File | Status |
 |---|---|
-| `privacy-policy.md` | ✅ Written — needs `[YOUR EMAIL]` and `[YOUR WEBSITE URL]` filled in |
-| `terms-of-service.md` | ✅ Written — needs name, email, website, state/country filled in |
+| `scrumbot-app/site/index.html` | ✅ Live on S3 — includes full consent disclosure, "Text START to (404) 948-5133" |
+| `scrumbot-app/site/privacy-policy.html` | ✅ Live on S3 — March 9, 2026, includes text messaging section, REMIND ME |
+| `scrumbot-app/site/terms-of-service.html` | ✅ Live on S3 — March 9, 2026, updated opt-in/frequency/contact |
+| `docs/legal/privacy-policy.md` | Superseded by HTML version above |
+| `docs/legal/terms-of-service.md` | Superseded by HTML version above |
 
-Both cover SMS opt-in/out, DynamoDB storage, Twilio + Anthropic as processors, TCPA language.
-Must be published to a live URL before Twilio A2P review can complete.
+All pages cover SMS opt-in/out, msg frequency (1-3/day), data rates, STOP/HELP, Twilio + Anthropic + AWS as processors, TCPA language. Published to a live URL for Twilio A2P review.
 
 ---
 
@@ -177,11 +197,11 @@ Must be published to a live URL before Twilio A2P review can complete.
 
 | Item | Status |
 |---|---|
-| Phone number | ✅ `+14049485133` (10DLC, Atlanta GA) |
-| Webhook URL set in Twilio console | ⏳ Pending — set to `{api_gateway_url}/sms` |
-| A2P 10DLC Campaign registration | 🔄 In review (1–3 business days) |
+| Phone number | ✅ `+14049485133` — (404) 948-5133 (10DLC, Atlanta GA) |
+| Webhook URL set in Twilio console | ✅ Set to `https://cbkpntvax6.execute-api.us-east-1.amazonaws.com/sms` |
+| A2P 10DLC Campaign registration | ✅ Approved (2026-03-23) |
 | Opt-in consent flow | ✅ Implemented in `sms/handler.py` |
-| Real SMS round-trip tested | ⏳ Pending webhook config |
+| Website with consent disclosure | ✅ Live at `stride-productivity-site.s3-website-us-east-1.amazonaws.com` |
 
 ---
 
@@ -189,12 +209,10 @@ Must be published to a live URL before Twilio A2P review can complete.
 
 | # | Task | Effort |
 |---|---|---|
-| 1 | **Set Twilio webhook** — paste `https://cbkpntvax6.execute-api.us-east-1.amazonaws.com/sms` into Twilio Console | 2 min |
-| 2 | **Real SMS smoke test** — text the number, confirm opt-in flow + agent reply | 15 min |
-| 3 | **Fill legal placeholders** — email, website URL, state in `docs/legal/` | 10 min |
-| 4 | **Publish legal docs** — GitHub Pages or Notion public page | 15 min |
-| 5 | **A2P approval** — wait for Twilio campaign approval (1–3 days) | — |
-| 6 | **Invite beta users** — once A2P approved + smoke tests pass | — |
+| 1 | ~~**A2P approval**~~ | ✅ Approved 2026-03-23 |
+| 2 | ~~**Real SMS smoke test**~~ | ✅ Done 2026-03-23 |
+| 3 | ~~**Phase 3: Proactive messaging**~~ | ✅ Done 2026-03-23 |
+| 4 | **Invite beta users** — system is ready | — |
 
 ---
 
@@ -204,18 +222,23 @@ Must be published to a live URL before Twilio A2P review can complete.
 # Live API
 API="https://cbkpntvax6.execute-api.us-east-1.amazonaws.com"
 
+# Website
+open http://stride-productivity-site.s3-website-us-east-1.amazonaws.com/
+
 # Logs
 make logs-sms                      # tail CloudWatch for stride-sms
 
 # Redeploy
 make deploy                        # build stride-sms image + push to ECR + terraform apply
 make push                          # build + push only (no infra change)
+make deploy-site                   # deploy website to S3
 make up                            # local dev with LocalStack
+make test                          # run 104 tests
 ```
 
 ---
 
-## Definition of Done — Sprint 2 + Consolidation
+## Definition of Done — Sprint 2 + Consolidation + Sprint 3 (Phases 0-2)
 
 - [x] stride-sms Lambda handles all user interaction — no stubs
 - [x] SMS opt-in consent flow enforced — no messages sent without YES reply
@@ -226,7 +249,14 @@ make up                            # local dev with LocalStack
 - [x] CloudWatch shows structured JSON logs for stride-sms
 - [x] X-Ray traces present for stride-sms
 - [x] stride-checkin and stride-agent removed — single Lambda architecture
+- [x] Conversation memory — per-user, 20-turn cap, weekly reset, tool stripping
+- [x] Habit model — create, complete, list with frequency-aware streaks
+- [x] Data moat fields — status_changed_at, blocker category, active_project_count, preferred_tone
+- [x] Feedback collection — keyword + agent-prompted + make commands
+- [x] Better onboarding — one question at a time, explains weekly rhythm
+- [x] BUG-001 fixed — preferred_tone preserved during weekly review
+- [x] 104 tests passing
+- [x] Privacy Policy + Terms live at a public URL (S3 static site)
+- [x] A2P Campaign fully approved (2026-03-23)
 - [ ] Real SMS round-trip with opt-in flow works end-to-end
-- [ ] Privacy Policy + Terms live at a public URL
-- [ ] A2P Campaign fully approved
 - [ ] Beta users onboarded

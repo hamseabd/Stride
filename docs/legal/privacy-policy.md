@@ -1,7 +1,10 @@
 # Privacy Policy
 
+> **Note:** This markdown version is superseded by the live HTML version at
+> http://stride-productivity-site.s3-website-us-east-1.amazonaws.com/privacy-policy.html
+
 **Stride**
-Last updated: February 27, 2026
+Last updated: March 9, 2026
 
 ---
 
@@ -10,7 +13,7 @@ Last updated: February 27, 2026
 Stride is a personal productivity coaching service that helps you set goals,
 track daily progress, and reflect on your work each week.
 
-If you have questions about this policy, contact us at: [YOUR EMAIL]
+If you have questions about this policy, contact us at: strideproductivity@gmail.com
 
 ---
 
@@ -65,8 +68,8 @@ YES to our confirmation message. Consent is voluntary. You will not receive
 SMS messages from Stride until you have confirmed opt-in.
 
 ### Message frequency
-Stride sends up to one check-in message per day and one weekly review
-summary, depending on your settings.
+Message frequency varies, typically 1-3 messages per day including daily
+check-in prompts, weekly planning messages, and weekly review summaries.
 
 ### Message and data rates
 Standard message and data rates from your mobile carrier may apply.
@@ -77,7 +80,7 @@ receive one final confirmation and no further messages will be sent. You can
 re-enrol at any time by contacting us.
 
 ### Help
-Reply **HELP** to any Stride message or email [YOUR EMAIL] for assistance.
+Reply **HELP** to any Stride message or email strideproductivity@gmail.com for assistance.
 
 ---
 
@@ -131,7 +134,7 @@ You have the right to:
 - **Deletion** — request that your data be deleted.
 - **Opt-out** — stop receiving SMS messages at any time by replying STOP.
 
-To exercise any of these rights, email [YOUR EMAIL].
+To exercise any of these rights, email strideproductivity@gmail.com.
 
 ---
 
@@ -156,8 +159,8 @@ acceptance of the updated policy.
 
 For privacy-related questions or requests:
 
-**Email:** [YOUR EMAIL]
-**Website:** [YOUR WEBSITE URL]
+**Email:** strideproductivity@gmail.com
+**Website:** https://stride-productivity-site.s3.amazonaws.com/index.html
 
 ---
 
