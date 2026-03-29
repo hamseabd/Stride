@@ -5,7 +5,7 @@ Python application code for **Stride** — a personal productivity coach for any
 This repo contains: shared library (`shared/`), Lambda handlers (`functions/`).
 
 Sprint 0 notebooks have been deleted. Sprint 1, 2, and consolidation are complete.
-**Current state: stride-sms is the only Lambda. stride-checkin and stride-agent have been removed.**
+**Current state: two Lambdas — stride-sms (POST /sms) and stride-scheduler (EventBridge). stride-checkin and stride-agent have been removed.**
 
 ## What this repo is NOT
 - No Terraform. No infrastructure code. Infrastructure lives in `scrumbot-infra/`.
@@ -31,16 +31,22 @@ Sprint 0 notebooks have been deleted. Sprint 1, 2, and consolidation are complet
 ```
 scrumbot-app/
 ├── functions/
-│   └── sms/
+│   ├── sms/
+│   │   ├── __init__.py
+│   │   └── handler.py      # POST /sms — Twilio webhook, full guard + consent + agent
+│   └── scheduler/
 │       ├── __init__.py
-│       └── handler.py      # POST /sms — Twilio webhook, full guard + consent + agent
+│       └── handler.py      # EventBridge — proactive outbound SMS (every 15 min)
 ├── shared/
 │   ├── __init__.py
 │   ├── tools.py            # ALL Strands @tool definitions (19 tools) — never inline
-│   ├── db.py               # boto3 client + consent + user bootstrap + conversation functions
+│   ├── db.py               # boto3 client + consent + user bootstrap + conversation + outbound
 │   ├── models.py           # Pydantic v2 models — one per DynamoDB entity
-│   ├── prompt.py           # STRIDE_SYSTEM_PROMPT — single source of truth
-│   └── guards.py           # check_message(), check_rate_limit()
+│   ├── prompt.py           # STRIDE_SYSTEM_PROMPT + PROMPT_VERSION — single source of truth
+│   ├── guards.py           # check_message(), check_rate_limit()
+│   ├── classifier.py       # Intent classification (Haiku) — feedback/remind_me/help/conversation
+│   ├── sms.py              # Twilio Client wrapper — send_sms()
+│   └── validators.py       # Post-generation response validation (jargon, length, empty)
 └── tests/
 ```
 
@@ -59,7 +65,7 @@ Always read from environment. Never hardcode. All must be present for local dev:
 
 | Variable | Local value | Lambda value |
 |---|---|---|
-| `ANTHROPIC_API_KEY` | `sk-ant-...` | Env var on Lambda (Secrets Manager in Sprint 3) |
+| `ANTHROPIC_API_KEY` | `sk-ant-...` | Env var on Lambda |
 | `DYNAMODB_TABLE_NAME` | `stride-local` | `stride-prod` |
 | `ENVIRONMENT` | `local` | `prod` |
 | `AWS_ENDPOINT_URL` | `http://localhost:4566` | Not set (omit from boto3 call) |
@@ -100,6 +106,9 @@ This pattern is the only acceptable way to handle the local/Lambda endpoint diff
 | Blocked log | `USER#{user_id}` | `BLOCKED#{iso_timestamp}` | — | — |
 | Conversation | `USER#{user_id}` | `CONVERSATION#CURRENT` | — | — |
 | Feedback | `USER#{user_id}` | `FEEDBACK#{iso_timestamp}` | — | — |
+| Proactive consent | `USER#{user_id}` | `CONSENT#PROACTIVE` | `PROACTIVE#ACTIVE` | `USER#{user_id}` |
+| Outbound message | `USER#{user_id}` | `OUTBOUND#{iso_timestamp}` | — | — |
+| Habit | `USER#{user_id}` | `HABIT#{habit_id}` | — | — |
 
 **GSI name:** `gsi1`
 **GSI attributes:** `gsi1pk` (String), `gsi1sk` (String), projection ALL
@@ -177,6 +186,12 @@ at write time. Always use `Decimal(str(value))` for float fields going to Dynamo
 - `record_consent(user_id, phone)` — writes active consent, returns bool
 - `revoke_consent(user_id)` — sets status=revoked, returns bool
 
+**Proactive consent:**
+- `get_proactive_consent(user_id)` — returns CONSENT#PROACTIVE item or None
+- `record_proactive_consent(user_id)` — writes active consent with GSI keys for scheduler lookup
+- `revoke_proactive_consent(user_id)` — sets status=revoked, removes GSI keys
+- `get_consented_users()` — GSI query for all active proactive consent users
+
 **User bootstrap:**
 - `get_or_create_user(user_id, phone)` — get or create USER#METADATA record, race-safe
 - `set_onboarded(user_id)` — sets onboarded=True on USER#METADATA, returns bool
@@ -185,8 +200,16 @@ at write time. Always use `Decimal(str(value))` for float fields going to Dynamo
 - `get_conversation(user_id)` — loads `CONVERSATION#CURRENT` item (list of message dicts)
 - `save_conversation(user_id, messages)` — writes capped (20-turn), tool-stripped history
 
+**Outbound messaging:**
+- `log_outbound(user_id, body, message_type, local_date)` — writes `OUTBOUND#{iso}` record
+- `get_latest_outbound(user_id)` — most recent outbound for replied_at tracking
+- `set_outbound_replied(user_id, outbound_sk)` — sets replied_at on specific outbound
+- `get_todays_outbound(user_id, local_date)` — dedup query by date + message_type
+- `get_outbound_since(user_id, since_date)` — range query for tone derivation
+- `update_preferred_tone(user_id, tone)` — updates PATTERN#AGGREGATE.preferred_tone
+
 **Feedback:**
-- `store_feedback(user_id, body, source)` — writes `FEEDBACK#{iso}` record
+- `store_feedback(user_id, text, source)` — writes `FEEDBACK#{iso}` record
 
 ---
 
@@ -266,14 +289,18 @@ Inbound SMS
 ├── 2. Parse From (user_id) + Body
 ├── 3. check_message()                → block if empty or >500 chars
 ├── 4. check_rate_limit()             → block if >50 msgs/day
-├── 5. STOP keyword                   → revoke_consent(), unsubscribe reply
-├── 6. HELP keyword                   → help text, no agent
-├── 7. get_consent()
+├── 5. STOP keyword                   → revoke all consent, unsubscribe reply
+├── 6. get_consent()
 │   ├── No consent / revoked          → send opt-in prompt
 │   └── YES keyword                   → record_consent(), welcome message
-├── 8. get_or_create_user()           → bootstrap USER# record
-├── 9. Onboarding check               → inject setup instructions if no projects
-└── 10. Agent call                    → _call_agent(), truncate reply at 1600 chars
+├── 7. Haiku classifier               → feedback/remind_me/no_reminders/help/conversation
+├── 8. Intent routing                 → feedback stored, remind_me/no_reminders toggle proactive
+├── 9. Track replied_at               → on latest outbound (for tone derivation)
+├── 10. get_or_create_user()          → bootstrap USER# record
+├── 11. Onboarding detection          → auto-complete if projects exist
+├── 12. Agent call                    → _call_agent() + logs agent_metrics (tokens, latency, cost)
+├── 13. validate_response()           → jargon/length/empty checks (warns, never blocks)
+└── 14. TwiML reply                   → truncate at 1600 chars at sentence boundary
 ```
 
 All errors return a generic TwiML reply — never expose stack traces via SMS.
@@ -284,14 +311,14 @@ All errors return a generic TwiML reply — never expose stack traces via SMS.
 
 ```python
 from pydantic import BaseModel, Field
-from datetime import datetime
+from datetime import datetime, timezone
 import uuid
 
 def _uuid() -> str:
     return str(uuid.uuid4())
 
 def _now() -> str:
-    return datetime.utcnow().isoformat() + "Z"
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 class MyModel(BaseModel):
     entity_id: str = Field(default_factory=_uuid)
@@ -333,11 +360,32 @@ Never log message content (PII). Always log user_id for traceability.
 
 ---
 
+## Observability — structured telemetry via Powertools Logger
+
+All telemetry is emitted as structured JSON log events via Powertools Logger. No CloudWatch custom metrics — query with CloudWatch Logs Insights or `scripts/analyze.py`.
+
+**Telemetry events logged in production:**
+
+| Event | Handler | Fields |
+|---|---|---|
+| `agent_metrics` | stride-sms | user_id, prompt_version, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, agent_latency_ms, agent_cycles, estimated_cost_usd, reply_length, is_new_user |
+| `classifier_metrics` | stride-sms | intent, classifier_latency_ms, input_tokens, output_tokens, user_message (first 50 chars) |
+| `validation_warning` | stride-sms | check (length_exceeded / jargon_detected / size_label_exposed / empty_response), details |
+| `scheduler_metrics` | stride-scheduler | users_processed, sent_count, error_count, run_duration_ms |
+
+**Prompt versioning:** `PROMPT_VERSION` in `shared/prompt.py`. Bump on every prompt change. Logged as a field in `agent_metrics` for correlation.
+
+**Response validation:** `shared/validators.py` runs after every agent call. Checks jargon, length, size labels, empty. Logs warnings, never blocks the response.
+
+**Analysis:** `make analyze` / `make analyze-cost` / `make analyze-quality` / `make analyze-week` — queries CloudWatch Logs Insights via `scripts/analyze.py`.
+
+---
+
 ## Hard constraints — enforce always
 
 1. No new AWS services. DynamoDB only.
-2. No Scan operations on DynamoDB.
-3. No raw Anthropic SDK. Strands only.
+2. No Scan operations on DynamoDB (scheduler GSI query is the one exception).
+3. No raw Anthropic SDK. Strands only. (Exception: `classifier.py` uses raw SDK for single fast completions.)
 4. No hardcoded AWS credentials, endpoints, table names, or regions.
 5. No `print()` anywhere. Powertools logger only.
 6. No tool defined outside `shared/tools.py`.
@@ -346,5 +394,8 @@ Never log message content (PII). Always log user_id for traceability.
 9. No "ScrumBot", "sprint" (user-facing), "story", "standup", or "Fibonacci" in any file.
 10. Float fields written to DynamoDB must be `Decimal` — use `Decimal(str(value))`.
 11. SMS opt-in consent required before any agent message is sent — TCPA compliance.
-12. History cap: 20 turns max before passing to agent — no unbounded context growth.
-13. SMS responses truncated at 1600 chars at a sentence boundary.
+12. Proactive consent required before outbound messages — TCPA (separate from SMS consent).
+13. History cap: 20 turns max before passing to agent — no unbounded context growth.
+14. SMS responses truncated at 1600 chars at a sentence boundary.
+15. Scheduler Lambda never calls Claude for data formatting — pure Python only (cost control).
+16. Pre-load all context before invoking the agent — the agent never fetches its own context.

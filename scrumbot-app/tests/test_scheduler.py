@@ -12,7 +12,6 @@ from functions.scheduler.handler import (
     _build_midweek_adjust,
     _build_planning_prompt,
     _build_review_prompt,
-    _build_nudge,
     _derive_tone,
     ESTIMATE_LABELS,
 )
@@ -120,17 +119,14 @@ class TestDetermineMessageType:
 class TestMessageBuilders:
     def test_evening_checkin_static(self):
         msg = _build_evening_checkin()
-        assert "check-in" in msg.lower() or "check in" in msg.lower()
-
-    def test_nudge_static(self):
-        msg = _build_nudge()
-        assert "heard from you" in msg.lower()
+        assert "how" in msg.lower()
+        assert "?" in msg
 
     @patch("functions.scheduler.handler.list_active_projects")
     def test_morning_reminder_no_projects(self, mock_projects):
         mock_projects.return_value = {"projects": []}
         msg = _build_morning_reminder("+15551234567")
-        assert "good morning" in msg.lower()
+        assert "morning" in msg.lower()
 
     @patch("functions.scheduler.handler.get_cycle_data")
     @patch("functions.scheduler.handler.list_active_projects")
@@ -157,17 +153,27 @@ class TestMessageBuilders:
         # Done tasks should be excluded
         assert "Logo" not in msg
 
+    @patch("functions.scheduler.handler.get_cycle_data")
     @patch("functions.scheduler.handler.list_active_projects")
-    def test_planning_prompt_with_projects(self, mock_projects):
+    def test_planning_prompt_with_projects(self, mock_projects, mock_cycle):
         mock_projects.return_value = {
             "projects": [
-                {"project_id": "p1", "name": "Portfolio", "target_date": "2026-06-01"},
-                {"project_id": "p2", "name": "Blog", "target_date": ""},
+                {"project_id": "p1", "name": "Portfolio", "target_date": "2026-06-01",
+                 "active_cycle": {"cycle_id": "c1"}},
+                {"project_id": "p2", "name": "Blog", "target_date": "",
+                 "active_cycle": None},
             ]
         }
+        mock_cycle.return_value = {
+            "tasks": [
+                {"title": "A", "status": "done"},
+            ],
+            "cycle": {},
+        }
         msg = _build_planning_prompt("+15551234567")
+        assert "New week" in msg
         assert "Portfolio" in msg
-        assert "due 2026-06-01" in msg
+        # Blog is a backlog goal — should be surfaced
         assert "Blog" in msg
 
     @patch("functions.scheduler.handler.get_cycle_data")
@@ -241,11 +247,7 @@ class TestToneDerivation:
             {"sent_at": "2026-03-21T09:00:00", "replied_at": "2026-03-21T09:15:00", "message_type": "morning_reminder"},
             {"sent_at": "2026-03-22T09:00:00", "replied_at": "2026-03-22T09:05:00", "message_type": "morning_reminder"},
         ]
-        # Even ISO week number
-        now = datetime(2026, 3, 27, 18, 5, tzinfo=ZoneInfo("America/New_York"))  # Week 13? Let me check
-        # Force even week by picking right date
-        now = datetime(2026, 4, 10, 18, 5, tzinfo=ZoneInfo("America/New_York"))  # Week 15 (odd)
-        now = datetime(2026, 4, 3, 18, 5, tzinfo=ZoneInfo("America/New_York"))   # Week 14 (even)
+        now = datetime(2026, 4, 3, 18, 5, tzinfo=ZoneInfo("America/New_York"))  # Week 14 (even)
         _derive_tone("+15551234567", now)
         mock_update.assert_called_once_with("+15551234567", "direct")
 

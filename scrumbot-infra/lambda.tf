@@ -62,7 +62,6 @@ module "lambda_scheduler" {
 
   environment_variables = merge(local.common_env, {
     POWERTOOLS_SERVICE_NAME = "stride-scheduler"
-    ANTHROPIC_API_KEY       = var.anthropic_api_key
     TWILIO_AUTH_TOKEN       = var.twilio_auth_token
     TWILIO_ACCOUNT_SID      = var.twilio_account_sid
     TWILIO_PHONE_NUMBER     = var.twilio_phone_number

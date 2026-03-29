@@ -1,6 +1,6 @@
 import json
 
-from shared.db import get_conversation, save_conversation, get_table
+from shared.db import get_conversation, save_conversation
 
 
 class TestSaveAndLoad:
@@ -51,7 +51,11 @@ class TestStripping:
 
 class TestCap:
     def test_caps_at_20_turns(self, ddb, user_id):
-        messages = [{"role": "user", "content": [{"type": "text", "text": f"msg {i}"}]} for i in range(30)]
+        # Alternating user/assistant messages (realistic conversation)
+        messages = []
+        for i in range(30):
+            role = "user" if i % 2 == 0 else "assistant"
+            messages.append({"role": role, "content": [{"type": "text", "text": f"msg {i}"}]})
         save_conversation(user_id, messages)
         loaded = get_conversation(user_id)
         assert len(loaded) == 20
@@ -69,44 +73,3 @@ class TestByteSizeSafety:
         assert len(raw) <= 350_000
 
 
-class TestWeeklyReset:
-    def test_resets_on_planning_day(self, ddb, user_id):
-        from datetime import datetime
-        from zoneinfo import ZoneInfo
-
-        messages = [{"role": "user", "content": [{"type": "text", "text": "hello"}]}]
-
-        tz = ZoneInfo("America/New_York")
-        now = datetime.now(tz)
-        current_weekday = now.isoweekday()
-
-        # Save the conversation, then manually set last_reset_date to an old date
-        # so get_conversation sees "planning day but haven't reset yet"
-        save_conversation(user_id, messages, planning_day=current_weekday, user_timezone="America/New_York")
-
-        # Overwrite last_reset_date to simulate a stale record from last week
-        table = get_table()
-        table.update_item(
-            Key={"pk": f"USER#{user_id}", "sk": "CONVERSATION#CURRENT"},
-            UpdateExpression="SET last_reset_date = :old",
-            ExpressionAttributeValues={":old": "2026-01-01"},
-        )
-
-        loaded = get_conversation(user_id)
-        assert loaded == []
-
-    def test_no_reset_on_different_day(self, ddb, user_id):
-        from datetime import datetime
-        from zoneinfo import ZoneInfo
-
-        messages = [{"role": "user", "content": [{"type": "text", "text": "hello"}]}]
-
-        tz = ZoneInfo("America/New_York")
-        now = datetime.now(tz)
-        current_weekday = now.isoweekday()
-        # Pick a different day
-        other_day = (current_weekday % 7) + 1
-
-        save_conversation(user_id, messages, planning_day=other_day, user_timezone="America/New_York")
-        loaded = get_conversation(user_id)
-        assert len(loaded) == 1

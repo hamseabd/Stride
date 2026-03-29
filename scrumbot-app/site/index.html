@@ -3,112 +3,752 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Stride — Your AI Productivity Coach</title>
+  <title>Stride — AI Productivity Coach via SMS</title>
+  <meta name="description" content="Stride is an AI productivity coach delivered entirely via SMS. Plan your week, check in daily, and finish what you start. Text START to (404) 948-5133.">
+  <meta name="robots" content="index, follow">
+  <link rel="canonical" href="https://stridealong.ai/">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>S</text></svg>">
+
+  <!-- Open Graph -->
+  <meta property="og:title" content="Stride — AI Productivity Coach via SMS">
+  <meta property="og:description" content="You've started a dozen side projects. How many did you finish? Stride is AI accountability that lives in your texts.">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://stridealong.ai/">
+  <meta property="og:site_name" content="Stride">
+
+  <!-- Twitter Card -->
+  <meta name="twitter:card" content="summary">
+  <meta name="twitter:title" content="Stride — AI Productivity Coach via SMS">
+  <meta name="twitter:description" content="You've started a dozen side projects. How many did you finish? Stride is AI accountability that lives in your texts.">
+
+  <!-- JSON-LD -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    "name": "Stride",
+    "description": "AI productivity coach delivered via SMS. Plan your week, check in daily, and finish what you start.",
+    "applicationCategory": "ProductivityApplication",
+    "operatingSystem": "SMS"
+  }
+  </script>
+
+  <!-- Inter font -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+
   <style>
+    :root {
+      --bg-dark: #0f172a;
+      --bg-dark-elevated: #1e293b;
+      --bg-light: #f5f3f0;
+      --bg-warm: #faf9f7;
+      --bg-white: #fefdfb;
+      --text-primary: #1a1a1a;
+      --text-secondary: #52525b;
+      --text-muted: #a1a1aa;
+      --text-on-dark: #f1f5f9;
+      --text-on-dark-muted: #94a3b8;
+      --accent: #f97316;
+      --accent-hover: #ea580c;
+      --accent-soft: rgba(249, 115, 22, 0.08);
+      --sms-blue: #3b82f6;
+      --sms-gray: #e8e5e1;
+      --border-light: #e7e5e4;
+      --border-dark: #334155;
+    }
+
     *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
 
     body {
-      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-      color: #1d1d1f;
-      background: #fff;
-      line-height: 1.5;
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      color: var(--text-primary);
+      background: var(--bg-warm);
+      line-height: 1.6;
       -webkit-font-smoothing: antialiased;
       -moz-osx-font-smoothing: grayscale;
     }
 
     .container {
-      max-width: 680px;
+      max-width: 1120px;
       margin: 0 auto;
-      padding: 80px 24px 60px;
+      padding: 0 40px;
     }
 
     /* ── Nav ─────────────────────────────────────────── */
+    .nav-wrapper {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      z-index: 100;
+      transition: background 0.3s, border-color 0.3s, backdrop-filter 0.3s;
+      border-bottom: 1px solid transparent;
+    }
+    .nav-wrapper.nav-dark {
+      background: transparent;
+    }
+    .nav-wrapper.nav-light {
+      background: rgba(250, 249, 247, 0.92);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      border-bottom-color: var(--border-light);
+    }
     nav {
-      padding: 32px 24px 0;
-      max-width: 680px;
+      max-width: 1120px;
       margin: 0 auto;
+      padding: 18px 40px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .nav-left {
+      display: flex;
+      align-items: center;
+      gap: 40px;
     }
     .wordmark {
-      font-size: 1.75rem;
+      font-size: 1.5rem;
       font-weight: 700;
-      color: #1d1d1f;
       text-decoration: none;
-      letter-spacing: -0.8px;
+      letter-spacing: -0.5px;
+      transition: color 0.3s;
+    }
+    .nav-dark .wordmark { color: #fff; }
+    .nav-light .wordmark { color: var(--text-primary); }
+    .nav-links {
+      display: flex;
+      gap: 28px;
+    }
+    .nav-links a {
+      font-size: 0.9375rem;
+      font-weight: 500;
+      text-decoration: none;
+      transition: color 0.3s, opacity 0.2s;
+    }
+    .nav-dark .nav-links a { color: var(--text-on-dark-muted); }
+    .nav-dark .nav-links a:hover { color: #fff; }
+    .nav-light .nav-links a { color: var(--text-secondary); }
+    .nav-light .nav-links a:hover { color: var(--text-primary); }
+    .nav-cta {
+      font-size: 0.875rem;
+      font-weight: 600;
+      color: #fff;
+      background: var(--accent);
+      text-decoration: none;
+      padding: 10px 24px;
+      border-radius: 100px;
+      transition: background 0.2s;
+    }
+    .nav-cta:hover { background: var(--accent-hover); }
+
+    /* ── Section helpers ─────────────────────────────── */
+    .section-label {
+      font-size: 0.75rem;
+      font-weight: 600;
+      color: var(--accent);
+      text-transform: uppercase;
+      letter-spacing: 1.5px;
+      margin-bottom: 16px;
+    }
+    h2 {
+      font-size: 2.5rem;
+      font-weight: 700;
+      letter-spacing: -0.025em;
+      line-height: 1.15;
+      margin-bottom: 16px;
+    }
+    .section-subtitle {
+      font-size: 1.125rem;
+      color: var(--text-secondary);
+      max-width: 560px;
+      line-height: 1.7;
     }
 
     /* ── Hero ────────────────────────────────────────── */
+    .hero-wrapper {
+      background: var(--bg-dark);
+      padding-top: 72px; /* nav height */
+    }
     .hero {
-      margin-bottom: 80px;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 56px;
+      align-items: center;
+      padding: 72px 0 88px;
     }
     h1 {
-      font-size: 2.75rem;
+      font-size: 4rem;
       font-weight: 700;
-      letter-spacing: -1.5px;
-      line-height: 1.1;
-      color: #1d1d1f;
+      letter-spacing: -0.03em;
+      line-height: 1.05;
+      color: #fff;
+      margin-bottom: 24px;
+    }
+    .hero-subtitle {
+      font-size: 1.125rem;
+      color: var(--text-on-dark-muted);
+      font-weight: 400;
+      line-height: 1.7;
+      margin-bottom: 0;
+    }
+    .hero-subtitle + .hero-subtitle {
+      margin-top: 12px;
+    }
+    .hero-subtitle:last-of-type {
+      margin-bottom: 36px;
+    }
+    .hero-cta {
+      display: inline-block;
+      background: var(--accent);
+      color: #fff;
+      text-decoration: none;
+      padding: 16px 36px;
+      border-radius: 12px;
+      font-size: 1.0625rem;
+      font-weight: 600;
+      transition: background 0.2s, transform 0.15s;
+    }
+    .hero-cta:hover {
+      background: var(--accent-hover);
+      transform: translateY(-1px);
+    }
+    .hero-meta {
+      margin-top: 16px;
+      font-size: 0.8125rem;
+      color: var(--text-on-dark-muted);
+      line-height: 1.7;
+    }
+
+    /* ── Phone mockup ────────────────────────────────── */
+    .phone-frame {
+      background: var(--bg-dark-elevated);
+      border: 1px solid var(--border-dark);
+      border-radius: 32px;
+      padding: 12px 16px 20px;
+      box-shadow: 0 0 60px rgba(249, 115, 22, 0.06), 0 24px 64px rgba(0, 0, 0, 0.35);
+      position: relative;
+    }
+    .phone-notch {
+      width: 120px;
+      height: 28px;
+      background: var(--bg-dark);
+      border-radius: 0 0 16px 16px;
+      margin: 0 auto 12px;
+    }
+    .phone-header {
+      text-align: center;
+      font-size: 0.8125rem;
+      color: var(--text-on-dark);
+      font-weight: 600;
+      margin-bottom: 16px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid var(--border-dark);
+    }
+    .chat-live {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      min-height: 300px;
+      max-height: 380px;
+      overflow-y: auto;
+      scrollbar-width: none;
+    }
+    .chat-live::-webkit-scrollbar { display: none; }
+    .msg {
+      max-width: 82%;
+      padding: 10px 14px;
+      border-radius: 18px;
+      font-size: 0.8125rem;
+      line-height: 1.45;
+    }
+    .msg.stride {
+      align-self: flex-start;
+      background: var(--sms-gray);
+      color: var(--text-primary);
+      border-bottom-left-radius: 6px;
+    }
+    .msg.user {
+      align-self: flex-end;
+      background: var(--sms-blue);
+      color: #fff;
+      border-bottom-right-radius: 6px;
+    }
+    .chat-live .msg {
+      opacity: 0;
+      transform: translateY(8px);
+      transition: opacity 0.3s, transform 0.3s;
+    }
+    .chat-live .msg.visible {
+      opacity: 1;
+      transform: translateY(0);
+    }
+    .typing-indicator {
+      align-self: flex-start;
+      background: var(--sms-gray);
+      border-radius: 18px;
+      border-bottom-left-radius: 6px;
+      padding: 12px 16px;
+      display: flex;
+      gap: 4px;
+      opacity: 0;
+      transition: opacity 0.2s;
+    }
+    .typing-indicator.visible { opacity: 1; }
+    .typing-indicator span {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--text-muted);
+      animation: typing-bounce 1.2s infinite;
+    }
+    .typing-indicator span:nth-child(2) { animation-delay: 0.15s; }
+    .typing-indicator span:nth-child(3) { animation-delay: 0.3s; }
+    @keyframes typing-bounce {
+      0%, 60%, 100% { transform: translateY(0); opacity: 0.4; }
+      30% { transform: translateY(-4px); opacity: 1; }
+    }
+
+    /* ── Phone frame for light sections ──────────────── */
+    .phone-frame-light {
+      background: var(--bg-white);
+      border: 1px solid var(--border-light);
+      border-radius: 32px;
+      padding: 12px 16px 20px;
+      box-shadow: 0 8px 40px rgba(0, 0, 0, 0.08), 0 2px 12px rgba(0, 0, 0, 0.04);
+      position: relative;
+      max-width: 380px;
+      margin: 0 auto;
+    }
+    .phone-notch-light {
+      width: 120px;
+      height: 28px;
+      background: var(--bg-light);
+      border-radius: 0 0 16px 16px;
+      margin: 0 auto 12px;
+    }
+    .phone-header-light {
+      text-align: center;
+      font-size: 0.8125rem;
+      color: var(--text-primary);
+      font-weight: 600;
+      margin-bottom: 16px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid var(--border-light);
+    }
+
+    /* ── Chat toggle tabs ────────────────────────────── */
+    .chat-toggle {
+      display: flex;
+      justify-content: center;
+      gap: 8px;
+      margin-bottom: 32px;
+      flex-wrap: wrap;
+    }
+    .chat-toggle button {
+      font-family: inherit;
+      font-size: 0.8125rem;
+      font-weight: 500;
+      color: var(--text-secondary);
+      background: var(--bg-white);
+      border: 1px solid var(--border-light);
+      border-radius: 100px;
+      padding: 8px 18px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .chat-toggle button:hover {
+      color: var(--text-primary);
+      border-color: var(--text-muted);
+    }
+    .chat-toggle button.active {
+      color: #fff;
+      background: var(--accent);
+      border-color: var(--accent);
+    }
+    .chat-toggle button:disabled {
+      opacity: 0.5;
+      cursor: default;
+    }
+
+    /* ── Anti-features strip ─────────────────────────── */
+    .anti-features {
+      background: var(--bg-dark-elevated);
+      border-top: 1px solid var(--border-dark);
+      padding: 40px 0 0;
+    }
+    .gradient-bridge {
+      height: 120px;
+      background: linear-gradient(to bottom, var(--bg-dark-elevated), var(--bg-light));
+    }
+    .gradient-bridge-story {
+      height: 100px;
+      background: linear-gradient(to bottom, var(--bg-dark), var(--bg-warm));
+    }
+    .gradient-to-dark {
+      height: 100px;
+      background: linear-gradient(to bottom, var(--bg-light), var(--bg-dark));
+    }
+    .anti-features-grid {
+      display: flex;
+      justify-content: center;
+      gap: 48px;
+      flex-wrap: wrap;
+    }
+    .anti-feature {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .anti-feature-icon {
+      width: 36px;
+      height: 36px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 10px;
+      background: rgba(249, 115, 22, 0.12);
+      flex-shrink: 0;
+    }
+    .anti-feature-icon svg {
+      width: 18px;
+      height: 18px;
+      stroke: var(--accent);
+      fill: none;
+      stroke-width: 2;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+    .anti-feature-text {
+      font-size: 0.9375rem;
+      font-weight: 500;
+      color: var(--text-on-dark);
+    }
+
+    /* ── How it works ────────────────────────────────── */
+    .how-section {
+      background: var(--bg-light);
+      padding: 48px 0 88px;
+    }
+    .how-header {
+      text-align: center;
+      margin-bottom: 56px;
+    }
+    .how-header .section-subtitle { margin: 0 auto; }
+    .steps {
+      list-style: none;
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 28px;
+    }
+    .steps li {
+      background: var(--bg-white);
+      border-radius: 16px;
+      padding: 32px 28px;
+      border: 1px solid var(--border-light);
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+    .steps li:hover {
+      border-color: var(--text-muted);
+      box-shadow: 0 4px 16px rgba(0,0,0,0.04);
+    }
+    .step-number {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      background: var(--accent);
+      color: #fff;
+      font-size: 0.875rem;
+      font-weight: 600;
       margin-bottom: 20px;
     }
-    .subtitle {
-      font-size: 1.25rem;
-      color: #6e6e73;
-      font-weight: 400;
-      max-width: 480px;
-    }
-
-    /* ── Value props ─────────────────────────────────── */
-    .props {
-      list-style: none;
-      margin-bottom: 80px;
-    }
-    .props li {
-      padding: 24px 0;
-      border-top: 1px solid #f0f0f0;
-    }
-    .props li:last-child {
-      border-bottom: 1px solid #f0f0f0;
-    }
-    .prop-title {
-      font-size: 1rem;
+    .step-title {
+      font-size: 1.0625rem;
       font-weight: 600;
-      color: #1d1d1f;
-      margin-bottom: 4px;
+      color: var(--text-primary);
+      margin-bottom: 8px;
     }
-    .prop-desc {
+    .step-desc {
       font-size: 0.9375rem;
-      color: #6e6e73;
+      color: var(--text-secondary);
+      line-height: 1.65;
     }
 
-    /* ── CTA ─────────────────────────────────────────── */
-    .cta {
-      background: #1d1d1f;
-      color: #fff;
-      padding: 32px;
-      border-radius: 16px;
-      text-align: center;
-      margin-bottom: 80px;
+    /* ── Conversation demos ──────────────────────────── */
+    .demos-section {
+      padding: 88px 0;
+      background: var(--bg-warm);
     }
-    .cta-label {
-      font-size: 0.875rem;
-      color: rgba(255, 255, 255, 0.6);
+    .demos-header {
+      text-align: center;
+      margin-bottom: 40px;
+    }
+    .demos-header .section-subtitle { margin: 0 auto; }
+
+    /* ── Why Stride — bento grid ─────────────────────── */
+    .why-section {
+      padding: 88px 0;
+      background: var(--bg-light);
+    }
+    .why-header {
+      margin-bottom: 48px;
+    }
+    .bento {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      grid-template-rows: auto auto auto;
+      gap: 20px;
+    }
+    .bento-card {
+      padding: 32px 28px;
+      border-radius: 16px;
+      background: var(--bg-white);
+      border: 1px solid var(--border-light);
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+    .bento-card:hover {
+      border-color: var(--text-muted);
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.04);
+    }
+    .bento-card.large {
+      grid-row: span 2;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+    }
+    .bento-card.wide {
+      grid-column: span 2;
+    }
+    .bento-icon {
+      width: 44px;
+      height: 44px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 12px;
+      background: var(--accent-soft);
+      margin-bottom: 20px;
+    }
+    .bento-icon svg {
+      width: 22px;
+      height: 22px;
+      stroke: var(--accent);
+      fill: none;
+      stroke-width: 2;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+    .bento-title {
+      font-size: 1.125rem;
+      font-weight: 600;
+      color: var(--text-primary);
       margin-bottom: 8px;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
+    }
+    .bento-desc {
+      font-size: 0.9375rem;
+      color: var(--text-secondary);
+      line-height: 1.65;
+    }
+    .bento-card.large .bento-title {
+      font-size: 1.375rem;
+    }
+    .bento-card.large .bento-desc {
+      font-size: 1rem;
+    }
+
+    /* ── Founder story ───────────────────────────────── */
+    .story-section {
+      background: var(--bg-dark);
+      padding: 88px 0;
+    }
+    .story-inner {
+      max-width: 640px;
+      margin: 0 auto;
+      text-align: center;
+    }
+    .story-inner .section-label {
+      color: var(--accent);
+    }
+    .story-inner h2 {
+      color: var(--text-on-dark);
+      margin-bottom: 32px;
+    }
+    .story-quote {
+      text-align: left;
+      position: relative;
+    }
+    .story-quote p {
+      font-size: 1.0625rem;
+      color: var(--text-on-dark-muted);
+      line-height: 1.8;
+      margin-bottom: 20px;
+    }
+    .story-quote p:last-of-type {
+      margin-bottom: 0;
+    }
+    .story-highlight {
+      color: var(--text-on-dark);
       font-weight: 500;
     }
-    .cta-number {
-      font-size: 1.75rem;
+    .story-attribution {
+      margin-top: 28px;
+      font-size: 0.9375rem;
+      color: var(--accent);
       font-weight: 600;
-      letter-spacing: 0.5px;
+    }
+
+    /* ── FAQ ─────────────────────────────────────────── */
+    .faq-section {
+      padding: 88px 0;
+      background: var(--bg-warm);
+    }
+    .faq-header {
+      text-align: center;
+      margin-bottom: 48px;
+    }
+    .faq-grid {
+      list-style: none;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      max-width: 880px;
+      margin: 0 auto;
+    }
+    .faq-card {
+      background: var(--bg-white);
+      border: 1px solid var(--border-light);
+      border-radius: 16px;
+      padding: 28px 24px;
+      cursor: pointer;
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+    .faq-card:hover {
+      border-color: var(--text-muted);
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.04);
+    }
+    .faq-question {
+      width: 100%;
+      background: none;
+      border: none;
+      padding: 0;
+      font-size: 1rem;
+      font-weight: 600;
+      color: var(--text-primary);
+      text-align: left;
+      cursor: pointer;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      font-family: inherit;
+      line-height: 1.4;
+      gap: 12px;
+    }
+    .faq-icon {
+      width: 24px;
+      height: 24px;
+      flex-shrink: 0;
+      border-radius: 50%;
+      background: var(--accent-soft);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.8125rem;
+      font-weight: 500;
+      color: var(--accent);
+      transition: transform 0.25s, background 0.25s;
+    }
+    .faq-card.open .faq-icon {
+      transform: rotate(45deg);
+      background: var(--accent);
+      color: #fff;
+    }
+    .faq-answer {
+      display: grid;
+      grid-template-rows: 0fr;
+      transition: grid-template-rows 0.3s ease, margin 0.3s ease;
+      margin-top: 0;
+    }
+    .faq-answer-inner {
+      overflow: hidden;
+    }
+    .faq-card.open .faq-answer {
+      grid-template-rows: 1fr;
+      margin-top: 14px;
+    }
+    .faq-answer-inner p {
+      font-size: 0.9375rem;
+      color: var(--text-secondary);
+      line-height: 1.7;
+    }
+    .faq-answer-inner a {
+      color: var(--accent);
+      text-decoration: underline;
+    }
+    .faq-answer-inner a:hover {
+      color: var(--accent-hover);
+    }
+
+    /* ── Final CTA ───────────────────────────────────── */
+    .cta-section {
+      padding: 0 0 88px;
+      background: var(--bg-warm);
+    }
+    .cta {
+      background: var(--bg-dark);
+      color: #fff;
+      padding: 72px 40px;
+      border-radius: 24px;
+      text-align: center;
+    }
+    .cta h2 {
+      color: #fff;
+      margin-bottom: 8px;
+    }
+    .cta-sub {
+      font-size: 1.0625rem;
+      color: var(--text-on-dark-muted);
+      margin-bottom: 32px;
+    }
+    .cta-btn {
+      display: inline-block;
+      background: var(--accent);
+      color: #fff;
+      text-decoration: none;
+      padding: 16px 36px;
+      border-radius: 12px;
+      font-size: 1.0625rem;
+      font-weight: 600;
+      transition: background 0.2s, transform 0.15s;
+    }
+    .cta-btn:hover {
+      background: var(--accent-hover);
+      transform: translateY(-1px);
+    }
+    .cta-number {
+      display: block;
+      margin-top: 12px;
+      font-size: 0.9375rem;
+      color: var(--text-on-dark-muted);
+    }
+    .cta-trial {
+      margin-top: 6px;
+      font-size: 0.8125rem;
+      color: var(--text-on-dark-muted);
+      opacity: 0.7;
     }
     .consent-disclosure {
-      max-width: 480px;
-      margin: 16px auto 0;
-      font-size: 0.75rem;
-      color: rgba(255, 255, 255, 0.5);
-      line-height: 1.5;
+      max-width: 520px;
+      margin: 24px auto 0;
+      font-size: 0.6875rem;
+      color: rgba(255, 255, 255, 0.35);
+      line-height: 1.6;
     }
     .consent-disclosure a {
-      color: rgba(255, 255, 255, 0.7);
+      color: rgba(255, 255, 255, 0.5);
       text-decoration: underline;
     }
     .consent-disclosure a:hover {
@@ -117,13 +757,24 @@
 
     /* ── Footer ──────────────────────────────────────── */
     footer {
-      padding-top: 24px;
-      border-top: 1px solid #f0f0f0;
+      padding: 32px 0 48px;
+      border-top: 1px solid var(--border-light);
       display: flex;
       justify-content: space-between;
       align-items: baseline;
       flex-wrap: wrap;
       gap: 12px;
+    }
+    .footer-left {
+      display: flex;
+      align-items: baseline;
+      gap: 24px;
+    }
+    .footer-wordmark {
+      font-size: 1rem;
+      font-weight: 700;
+      color: var(--text-primary);
+      letter-spacing: -0.5px;
     }
     .footer-links {
       display: flex;
@@ -131,69 +782,690 @@
     }
     footer a {
       font-size: 0.8125rem;
-      color: #6e6e73;
+      color: var(--text-muted);
       text-decoration: none;
     }
     footer a:hover {
-      color: #1d1d1f;
+      color: var(--text-primary);
     }
     .footer-contact {
       font-size: 0.8125rem;
-      color: #86868b;
+      color: var(--text-muted);
     }
-    .footer-contact a {
-      color: #86868b;
+    .footer-contact a { color: var(--text-muted); }
+    .footer-contact a:hover { color: var(--text-primary); }
+
+    /* ── Mobile sticky CTA bar ───────────────────────── */
+    .mobile-cta-bar {
+      display: none;
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      z-index: 99;
+      padding: 12px 20px;
+      padding-bottom: calc(12px + env(safe-area-inset-bottom));
+      background: var(--bg-dark);
+      border-top: 1px solid var(--border-dark);
+      transform: translateY(100%);
+      transition: transform 0.3s ease;
     }
-    .footer-contact a:hover {
-      color: #1d1d1f;
+    .mobile-cta-bar.visible { transform: translateY(0); }
+    .mobile-cta-bar a {
+      display: block;
+      background: var(--accent);
+      color: #fff;
+      text-align: center;
+      padding: 14px;
+      border-radius: 12px;
+      font-weight: 600;
+      text-decoration: none;
+      font-size: 0.9375rem;
+    }
+
+    /* ── Scroll animations ───────────────────────────── */
+    @media (prefers-reduced-motion: no-preference) {
+      .fade-up {
+        opacity: 0;
+        transform: translateY(24px);
+        transition: opacity 0.6s ease-out, transform 0.6s ease-out;
+      }
+      .fade-up.visible {
+        opacity: 1;
+        transform: translateY(0);
+      }
+      .fade-up.s2 { transition-delay: 0.1s; }
+      .fade-up.s3 { transition-delay: 0.2s; }
+      .fade-up.s4 { transition-delay: 0.3s; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .fade-up { opacity: 1; transform: none; }
+    }
+
+    /* ── Responsive: tablet ─────────────────────────── */
+    @media (max-width: 900px) {
+      .container, nav { padding-left: 24px; padding-right: 24px; }
+
+      /* Nav */
+      .nav-links { display: none; }
+
+      /* Hero */
+      .hero { grid-template-columns: 1fr; gap: 40px; text-align: center; }
+      .hero-content { order: 1; }
+      .hero-phone { order: 2; max-width: 380px; margin: 0 auto; }
+      h1 { font-size: 2.75rem; }
+      .hero-subtitle { max-width: 520px; margin-left: auto; margin-right: auto; }
+
+      /* Sections */
+      h2 { font-size: 2rem; }
+      .section-subtitle { margin-left: auto; margin-right: auto; }
+      .steps { grid-template-columns: 1fr; gap: 16px; }
+      .bento { grid-template-columns: 1fr; }
+      .bento-card.large { grid-row: span 1; }
+      .bento-card.wide { grid-column: span 1; }
+      .faq-grid { grid-template-columns: 1fr; }
+      .anti-features-grid { gap: 24px; }
+
+      /* Gradient bridges */
+      .gradient-bridge { height: 80px; }
+      .gradient-bridge-story { height: 64px; }
+      .gradient-to-dark { height: 64px; }
+
+      /* Story */
+      .story-inner { max-width: 100%; }
+
+      /* Footer */
+      footer { flex-direction: column; align-items: center; text-align: center; gap: 16px; }
+      .footer-left { flex-direction: column; align-items: center; gap: 12px; }
+
+      /* Mobile CTA bar */
+      .mobile-cta-bar { display: block; }
+    }
+
+    /* ── Responsive: mobile ──────────────────────────── */
+    @media (max-width: 600px) {
+      .container, nav { padding-left: 20px; padding-right: 20px; }
+
+      /* Type scale — stay readable */
+      h1 { font-size: 2.25rem; letter-spacing: -0.025em; }
+      h2 { font-size: 1.625rem; }
+      .hero-subtitle { font-size: 1rem; }
+      .section-subtitle { font-size: 1rem; }
+
+      /* Hero — phone mockup fills more width */
+      .hero-wrapper { padding-top: 60px; }
+      .hero { padding: 36px 0 48px; gap: 28px; }
+      .hero-cta {
+        display: block;
+        text-align: center;
+        padding: 16px 28px;
+        font-size: 1rem;
+        border-radius: 14px;
+      }
+      .hero-meta { font-size: 0.75rem; }
+      .hero-phone { max-width: 100%; }
+
+      /* Phone frames — wider, readable text */
+      .phone-frame, .phone-frame-light {
+        border-radius: 24px;
+        padding: 10px 14px 16px;
+      }
+      .phone-frame-light { max-width: 100%; }
+      .phone-notch, .phone-notch-light { width: 100px; height: 24px; }
+      .chat-live { min-height: 260px; max-height: 340px; }
+      .msg { font-size: 0.8125rem; padding: 10px 12px; }
+
+      /* Sections — tighter vertical rhythm */
+      .how-section { padding: 40px 0 56px; }
+      .demos-section, .why-section, .story-section, .faq-section { padding: 56px 0; }
+      .how-header, .demos-header, .faq-header { margin-bottom: 28px; }
+      .why-header { margin-bottom: 28px; }
+
+      /* Cards */
+      .steps li { padding: 24px 20px; }
+      .step-desc { font-size: 0.875rem; }
+      .bento-card { padding: 24px 20px; }
+      .bento-card.large .bento-title { font-size: 1.125rem; }
+      .bento-card.large .bento-desc { font-size: 0.9375rem; }
+      .bento-desc { font-size: 0.875rem; }
+
+      /* FAQ — bigger tap targets */
+      .faq-card { padding: 20px 18px; }
+      .faq-question { font-size: 0.9375rem; min-height: 44px; }
+      .faq-icon { width: 28px; height: 28px; font-size: 0.875rem; }
+      .faq-answer-inner p { font-size: 0.875rem; }
+
+      /* Anti-features */
+      .anti-features { padding: 28px 0 0; }
+      .anti-features-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 16px;
+      }
+      .anti-feature { flex-direction: column; text-align: center; gap: 8px; }
+      .anti-feature-text { font-size: 0.8125rem; }
+      .anti-feature-icon { width: 32px; height: 32px; }
+      .anti-feature-icon svg { width: 16px; height: 16px; }
+
+      /* Chat toggle — thumb-friendly */
+      .chat-toggle { gap: 6px; }
+      .chat-toggle button {
+        font-size: 0.75rem;
+        padding: 8px 14px;
+        min-height: 36px;
+      }
+
+      /* Story */
+      .story-quote p { font-size: 0.9375rem; line-height: 1.7; }
+      .story-inner h2 { font-size: 1.5rem; }
+
+      /* CTA */
+      .cta { padding: 48px 20px; border-radius: 20px; }
+      .cta h2 { font-size: 1.5rem; }
+      .cta-btn {
+        display: block;
+        text-align: center;
+        padding: 16px;
+        font-size: 1rem;
+      }
+      .consent-disclosure { font-size: 0.625rem; }
+
+      /* Gradient bridges — shorter on mobile */
+      .gradient-bridge { height: 48px; }
+      .gradient-bridge-story { height: 36px; }
+      .gradient-to-dark { height: 36px; }
+
+      /* Sticky bar */
+      .mobile-cta-bar { padding: 10px 16px; }
+
+      /* Footer — clear the sticky CTA bar */
+      footer { padding-bottom: 80px; }
+    }
+
+    /* ── Responsive: small mobile (iPhone SE, etc) ──── */
+    @media (max-width: 380px) {
+      h1 { font-size: 1.875rem; }
+      h2 { font-size: 1.375rem; }
+      .hero-subtitle { font-size: 0.9375rem; }
+      .anti-features-grid { grid-template-columns: 1fr; gap: 12px; }
+      .anti-feature { flex-direction: row; text-align: left; }
+      .chat-toggle button { font-size: 0.6875rem; padding: 7px 10px; }
+      .nav-cta { font-size: 0.8125rem; padding: 8px 18px; }
     }
   </style>
 </head>
 <body>
-  <nav>
-    <a href="index.html" class="wordmark">Stride</a>
-  </nav>
 
+  <!-- ── Nav ────────────────────────────────────────── -->
+  <div class="nav-wrapper nav-dark" id="navWrapper">
+    <nav>
+      <div class="nav-left">
+        <a href="/" class="wordmark">Stride</a>
+        <div class="nav-links">
+          <a href="#how">How it works</a>
+          <a href="#why">Why Stride</a>
+          <a href="#faq">FAQ</a>
+        </div>
+      </div>
+      <a href="sms:+14049485133?body=START" class="nav-cta">Get started</a>
+    </nav>
+  </div>
+
+  <!-- ── Hero ───────────────────────────────────────── -->
+  <div class="hero-wrapper" id="heroSection">
+    <div class="container">
+      <div class="hero">
+        <div class="hero-content">
+          <h1>Finish what you start.</h1>
+          <p class="hero-subtitle">You've started a dozen side projects. How many did you actually finish?</p>
+          <p class="hero-subtitle">Stride is an AI coach that lives in your texts — checking in daily, learning your patterns, and keeping you honest.</p>
+          <a href="sms:+14049485133?body=START" class="hero-cta" id="heroCta">Text START to (404) 948-5133</a>
+          <div class="hero-meta">Free during beta. No app to download.</div>
+        </div>
+        <div class="hero-phone">
+          <div class="phone-frame">
+            <div class="phone-notch"></div>
+            <div class="phone-header">Stride</div>
+            <div class="chat-live" id="heroChat">
+              <div class="typing-indicator" id="heroTyping"><span></span><span></span><span></span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Anti-features strip ─────────────────────────── -->
+  <div class="anti-features">
+    <div class="container">
+      <div class="anti-features-grid">
+        <div class="anti-feature fade-up">
+          <div class="anti-feature-icon">
+            <svg viewBox="0 0 24 24"><rect x="5" y="2" width="14" height="20" rx="2" ry="2"></rect><line x1="8" y1="18" x2="16" y2="14"></line><line x1="8" y1="14" x2="16" y2="18"></line></svg>
+          </div>
+          <span class="anti-feature-text">No app to download</span>
+        </div>
+        <div class="anti-feature fade-up s2">
+          <div class="anti-feature-icon">
+            <svg viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path><line x1="9" y1="17" x2="15" y2="17"></line></svg>
+          </div>
+          <span class="anti-feature-text">No login or password</span>
+        </div>
+        <div class="anti-feature fade-up s3">
+          <div class="anti-feature-icon">
+            <svg viewBox="0 0 24 24"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path><path d="M13.73 21a2 2 0 0 1-3.46 0"></path><line x1="1" y1="1" x2="23" y2="23"></line></svg>
+          </div>
+          <span class="anti-feature-text">No notifications to ignore</span>
+        </div>
+        <div class="anti-feature fade-up s4">
+          <div class="anti-feature-icon">
+            <svg viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
+          </div>
+          <span class="anti-feature-text">Just text</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Gradient bridge: dark → light ────────────── -->
+  <div class="gradient-bridge"></div>
+
+  <!-- ── How it works ──────────────────────────────── -->
+  <div class="how-section" id="how">
+    <div class="container">
+      <div class="how-header">
+        <div class="section-label">How it works</div>
+        <h2>Three texts to a better week.</h2>
+        <p class="section-subtitle">No app to install. No account to create. Just text.</p>
+      </div>
+      <ol class="steps">
+        <li class="fade-up">
+          <div class="step-number">1</div>
+          <div class="step-title">Text START</div>
+          <div class="step-desc">Send a text to (404) 948-5133. Stride asks what you're working on and helps you plan your first week. Takes about 5 minutes.</div>
+        </li>
+        <li class="fade-up s2">
+          <div class="step-number">2</div>
+          <div class="step-title">Stride texts you</div>
+          <div class="step-desc">Each morning, Stride checks in: what happened, what's next, anything stuck? Reply in 30 seconds and get back to work.</div>
+        </li>
+        <li class="fade-up s3">
+          <div class="step-number">3</div>
+          <div class="step-title">Get better every week</div>
+          <div class="step-desc">Every Friday, Stride reviews what you planned vs. what you finished. It spots patterns you'd miss and suggests one thing to try differently.</div>
+        </li>
+      </ol>
+    </div>
+  </div>
+
+  <!-- ── Conversation demos ──────────────────────────── -->
+  <div class="demos-section" id="demos">
+    <div class="container">
+      <div class="demos-header">
+        <div class="section-label">See it in action</div>
+        <h2>Real conversations. Real coaching.</h2>
+        <p class="section-subtitle">Follow along as Stride helps plan, track, and review a 3-week project.</p>
+      </div>
+      <div class="chat-toggle" id="demoToggle">
+        <button class="active" data-target="getstarted">Get started</button>
+        <button data-target="planning">Planning</button>
+        <button data-target="checkin">Daily check-in</button>
+        <button data-target="review">Weekly review</button>
+      </div>
+      <div class="phone-frame-light">
+        <div class="phone-notch-light"></div>
+        <div class="phone-header-light">Stride</div>
+        <div class="chat-live" id="demoChat">
+          <div class="typing-indicator" id="demoTyping"><span></span><span></span><span></span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Why Stride ──────────────────────────────────── -->
+  <div class="why-section" id="why">
+    <div class="container">
+      <div class="why-header">
+        <div class="section-label">Why Stride</div>
+        <h2>A coach that actually knows you.</h2>
+        <p class="section-subtitle">Most productivity tools wait for you to show up. Stride doesn't.</p>
+      </div>
+      <div class="bento">
+        <div class="bento-card large fade-up">
+          <div class="bento-icon">
+            <svg viewBox="0 0 24 24"><path d="M22 2L11 13"></path><path d="M22 2L15 22L11 13L2 9L22 2Z"></path></svg>
+          </div>
+          <div class="bento-title">It texts you first</div>
+          <div class="bento-desc">Every other tool waits for you to open it. Stride sends the first text. That push is the whole point — you don't need another app to forget to open.</div>
+        </div>
+        <div class="bento-card fade-up s2">
+          <div class="bento-icon">
+            <svg viewBox="0 0 24 24"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg>
+          </div>
+          <div class="bento-title">Learns your patterns</div>
+          <div class="bento-desc">Notices where you overcommit, what you underestimate, and when things stall. Then adjusts its coaching to you.</div>
+        </div>
+        <div class="bento-card fade-up s3">
+          <div class="bento-icon">
+            <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+          </div>
+          <div class="bento-title">30 seconds, not 30 minutes</div>
+          <div class="bento-desc">Check in with three quick answers. Review your week in a few texts. Stride respects your time.</div>
+        </div>
+        <div class="bento-card wide fade-up s4">
+          <div class="bento-icon">
+            <svg viewBox="0 0 24 24"><rect x="5" y="2" width="14" height="20" rx="2" ry="2"></rect><line x1="12" y1="18" x2="12.01" y2="18"></line></svg>
+          </div>
+          <div class="bento-title">Any phone. No app.</div>
+          <div class="bento-desc">Works over standard SMS. iPhone, Android, flip phone. No download, no account, no password. If you can send a text, you can use Stride.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Gradient bridge: light → dark ────────────── -->
+  <div class="gradient-to-dark"></div>
+
+  <!-- ── Founder story ───────────────────────────────── -->
+  <div class="story-section">
+    <div class="container">
+      <div class="story-inner fade-up">
+        <div class="section-label">Why I built this</div>
+        <h2>The story behind Stride</h2>
+        <div class="story-quote">
+          <p><span class="story-highlight">At work, I finish what I commit to.</span> Someone checks what I said I'd do, notices when I'm overloaded, and helps me adjust. Accountability is just part of the system.</p>
+          <p><span class="story-highlight">My side projects? They die.</span> I start strong, miss a few days, and quietly move on. I've tried the apps, the planners, the systems. The problem was never the tool — it was that nothing followed up.</p>
+          <p>So I built Stride. It texts me Monday to plan my week and break my goals down into tasks. It texts me every morning with what I said I'd do. It checks in at night. On Fridays, it shows me what I actually finished versus what I planned. And after a few weeks, <span class="story-highlight">it started pointing out things I couldn't see myself</span> — like how I overcommit every Monday and underestimate anything that involves writing.</p>
+          <p>No app. No dashboard. Just something in my texts that knows my patterns better than I do.</p>
+          <p><span class="story-highlight">I built it for myself first.</span> If your side projects keep dying in your notes app, it might be for you too.</p>
+        </div>
+        <div class="story-attribution">— Hamza </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Gradient bridge: story → FAQ ─────────────── -->
+  <div class="gradient-bridge-story"></div>
+
+  <!-- ── FAQ ─────────────────────────────────────────── -->
+  <div class="faq-section" id="faq">
+    <div class="container">
+      <div class="faq-header">
+        <div class="section-label">Questions</div>
+        <h2>Everything you want to know</h2>
+      </div>
+      <ul class="faq-grid">
+        <li class="faq-card fade-up">
+          <button class="faq-question">
+            <span>How is this different from a to-do app?</span>
+            <span class="faq-icon">+</span>
+          </button>
+          <div class="faq-answer"><div class="faq-answer-inner"><p>A to-do app holds your list. Stride texts you about it. Every morning it asks what happened, every Friday it shows you what you actually finished. It's the difference between writing a plan and having someone hold you to it.</p></div></div>
+        </li>
+        <li class="faq-card fade-up s2">
+          <button class="faq-question">
+            <span>Is Stride AI or a real person?</span>
+            <span class="faq-icon">+</span>
+          </button>
+          <div class="faq-answer"><div class="faq-answer-inner"><p>AI. Stride uses advanced language models to understand your goals, track your progress, and coach you through natural conversation. It gets smarter about your habits the longer you use it.</p></div></div>
+        </li>
+        <li class="faq-card fade-up">
+          <button class="faq-question">
+            <span>How often will Stride text me?</span>
+            <span class="faq-icon">+</span>
+          </button>
+          <div class="faq-answer"><div class="faq-answer-inner"><p>A morning check-in on weekdays, a planning text on Mondays, and a review on Fridays. Typically 1-2 messages a day. You pick the times that work for you, and you can adjust anytime.</p></div></div>
+        </li>
+        <li class="faq-card fade-up s2">
+          <button class="faq-question">
+            <span>Does it work on any phone?</span>
+            <span class="faq-icon">+</span>
+          </button>
+          <div class="faq-answer"><div class="faq-answer-inner"><p>If it can send a text, it works. Standard SMS — iPhone, Android, even a flip phone. No app to download, no account to create.</p></div></div>
+        </li>
+        <li class="faq-card fade-up">
+          <button class="faq-question">
+            <span>Is my data private?</span>
+            <span class="faq-icon">+</span>
+          </button>
+          <div class="faq-answer"><div class="faq-answer-inner"><p>Your data is never sold or shared for marketing. Stride stores only what it needs to coach you — your goals, tasks, and progress. See our <a href="privacy-policy.html">Privacy Policy</a> for the full details.</p></div></div>
+        </li>
+        <li class="faq-card fade-up s2">
+          <button class="faq-question">
+            <span>What if I want to stop?</span>
+            <span class="faq-icon">+</span>
+          </button>
+          <div class="faq-answer"><div class="faq-answer-inner"><p>Reply STOP anytime. All messages stop immediately — no follow-ups, no "are you sure?", no hoops.</p></div></div>
+        </li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- ── Final CTA ───────────────────────────────────── -->
+  <div class="cta-section">
+    <div class="container">
+      <div class="cta">
+        <h2>Your goals aren't going to finish themselves.</h2>
+        <p class="cta-sub">One text. That's it.</p>
+        <a href="sms:+14049485133?body=START" class="cta-btn">Text START to get started</a>
+        <div class="cta-number">Or text START to (404) 948-5133</div>
+        <div class="cta-trial">Free during beta.</div>
+        <p class="consent-disclosure">By texting START, you consent to receive recurring automated productivity coaching messages from Stride. Msg frequency varies, typically 1-3 messages per day. Msg &amp; data rates may apply. Reply STOP to unsubscribe, HELP for help. No mobile information will be shared with third parties for marketing purposes. <a href="privacy-policy.html">Privacy Policy</a> · <a href="terms-of-service.html">Terms of Service</a></p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Footer ──────────────────────────────────────── -->
   <div class="container">
-    <div class="hero">
-      <h1>Finish what <br>you start.</h1>
-      <p class="subtitle">Stride is an AI productivity coach that works entirely over SMS. Plan your week, check in daily, review what worked — all via text.</p>
-    </div>
-
-    <ul class="props">
-      <li>
-        <div class="prop-title">Coaching via text</div>
-        <div class="prop-desc">Plan your week, check in daily, and review progress. No download needed, no dashboard to check.</div>
-      </li>
-      <li>
-        <div class="prop-title">Learns your patterns</div>
-        <div class="prop-desc">Stride tracks where you overcommit, what you underestimate, and when things stall. Then it adapts.</div>
-      </li>
-      <li>
-        <div class="prop-title">Async by default</div>
-        <div class="prop-desc">No meetings, no notifications. Text when it works for you. Stride is there when you are.</div>
-      </li>
-      <li>
-        <div class="prop-title">Built for people who ship</div>
-        <div class="prop-desc">Freelancers, students, consultants, indie makers. If you have goals and want to hit them, Stride is for you.</div>
-      </li>
-    </ul>
-
-    <div class="cta">
-      <div class="cta-label">Get started</div>
-      <div class="cta-number">Text START to (404) 948-5133</div>
-      <p class="consent-disclosure">By texting START to (404) 948-5133, you consent to receive recurring automated productivity coaching messages from Stride. Msg frequency varies, typically 1-3 messages per day. Msg &amp; data rates may apply. Reply STOP to unsubscribe, HELP for help. No mobile information will be shared with third parties for marketing purposes. View our <a href="privacy-policy.html">Privacy Policy</a> and <a href="terms-of-service.html">Terms of Service</a>.</p>
-    </div>
-
     <footer>
-      <div class="footer-links">
-        <a href="privacy-policy.html">Privacy</a>
-        <a href="terms-of-service.html">Terms</a>
+      <div class="footer-left">
+        <span class="footer-wordmark">Stride</span>
+        <div class="footer-links">
+          <a href="privacy-policy.html">Privacy</a>
+          <a href="terms-of-service.html">Terms</a>
+        </div>
       </div>
       <div class="footer-contact">
-        <a href="mailto:strideproductivity@gmail.com">strideproductivity@gmail.com</a>
+        (404) 948-5133
       </div>
     </footer>
   </div>
+
+  <!-- ── Mobile sticky CTA ───────────────────────────── -->
+  <div class="mobile-cta-bar" id="mobileCta">
+    <a href="sms:+14049485133?body=START">Text START to get started</a>
+  </div>
+
+  <script>
+    // ── Conversation data ──────────────────────────────
+    var convos = {
+      getstarted: [
+        { from: 'stride', text: "Hey! I\u2019m Stride. I help you finish what you start. What are you working on right now?" },
+        { from: 'user', text: "Building a portfolio website" },
+        { from: 'stride', text: "Nice \u2014 got a deadline?" },
+        { from: 'user', text: "I want it live in 3 weeks" },
+        { from: 'stride', text: "3 weeks works. What feels like the first step to you?" },
+        { from: 'user', text: "Probably figuring out what projects to feature and writing the copy" },
+        { from: 'stride', text: "Smart \u2014 content first, then build. I\u2019d break it into three weeks: gather content and design, build the pages, then polish and go live. Sound right?" },
+        { from: 'user', text: "Yeah that works" },
+        { from: 'stride', text: "This week \u2014 nail down which projects to feature. I\u2019ll check in tomorrow." }
+      ],
+      planning: [
+        { from: 'stride', text: "Monday! You finished the content and picked your projects last week. The design took a bit longer than planned." },
+        { from: 'user', text: "Yeah I kept going back and forth on the layout" },
+        { from: 'stride', text: "That\u2019s normal \u2014 design decisions eat more time than you\u2019d think. Ready to build this week?" },
+        { from: 'user', text: "Yeah but I don\u2019t want to overdo it again" },
+        { from: 'stride', text: "Last week you got about a day and a half done. How about just the homepage this week?" },
+        { from: 'user', text: "Yeah let\u2019s keep it focused" },
+        { from: 'stride', text: "Good call. Homepage this week. I\u2019ll check in Wednesday." }
+      ],
+      checkin: [
+        { from: 'stride', text: "Morning \u2014 how\u2019d yesterday go?" },
+        { from: 'user', text: "Got the homepage mostly done, just need the footer" },
+        { from: 'stride', text: "Almost there. What\u2019s the plan for today?" },
+        { from: 'user', text: "Finish the footer and start on project pages" },
+        { from: 'stride', text: "Anything blocking you?" },
+        { from: 'user', text: "Nope" },
+        { from: 'stride', text: "Footer then project pages. You\u2019ve got this." }
+      ],
+      review: [
+        { from: 'stride', text: "Week 2 done. You planned the homepage and finished it \u2014 nice work. Project pages carried over." },
+        { from: 'user', text: "Yeah I ran out of time Friday" },
+        { from: 'stride', text: "Two weeks in and both times Friday tasks slipped. Worth planning lighter Fridays?" },
+        { from: 'user', text: "Actually yeah good call" },
+        { from: 'stride', text: "I\u2019ll keep that in mind going forward. Ready to plan week 3 Monday?" }
+      ]
+    };
+
+    // ── Chat animation engine ────────────────────────
+    function createChatEngine(chatEl, typingEl) {
+      var cancelId = 0;
+
+      function play(name) {
+        cancelId++;
+        var myId = cancelId;
+        var msgs = convos[name];
+        if (!msgs) return;
+
+        chatEl.querySelectorAll('.msg').forEach(function(m) { m.remove(); });
+        typingEl.classList.remove('visible');
+
+        var i = 0;
+        function showNext() {
+          if (myId !== cancelId) return;
+          if (i >= msgs.length) { return; }
+
+          var m = msgs[i];
+          var delay = m.from === 'stride' ? 600 + Math.min(m.text.length * 6, 1000) : 350;
+
+          if (m.from === 'stride') {
+            typingEl.classList.add('visible');
+            chatEl.scrollTop = chatEl.scrollHeight;
+          }
+
+          setTimeout(function() {
+            if (myId !== cancelId) return;
+            typingEl.classList.remove('visible');
+
+            var el = document.createElement('div');
+            el.className = 'msg ' + m.from;
+            el.innerHTML = m.text.replace(/\n/g, '<br>');
+            chatEl.insertBefore(el, typingEl);
+
+            void el.offsetWidth;
+            el.classList.add('visible');
+            chatEl.scrollTop = chatEl.scrollHeight;
+
+            i++;
+            var pause = m.from === 'user' ? 450 : 600;
+            setTimeout(showNext, pause);
+          }, delay);
+        }
+
+        setTimeout(showNext, 400);
+      }
+
+      function cancel() { cancelId++; }
+
+      return { play: play, cancel: cancel };
+    }
+
+    // ── Hero chat (auto-play onboarding) ─────────────
+    var heroEngine = createChatEngine(
+      document.getElementById('heroChat'),
+      document.getElementById('heroTyping')
+    );
+    heroEngine.play('getstarted');
+
+    // ── Demo section chat ────────────────────────────
+    var demoEngine = createChatEngine(
+      document.getElementById('demoChat'),
+      document.getElementById('demoTyping')
+    );
+
+    var demoToggle = document.getElementById('demoToggle');
+    var demoButtons = demoToggle.querySelectorAll('button');
+
+    demoButtons.forEach(function(btn) {
+      btn.addEventListener('click', function() {
+        demoButtons.forEach(function(b) { b.classList.remove('active'); });
+        this.classList.add('active');
+        demoEngine.play(this.getAttribute('data-target'));
+      });
+    });
+
+    // Auto-play first demo tab when section scrolls into view
+    var demoPlayed = false;
+    var demoObserver = new IntersectionObserver(function(entries) {
+      if (entries[0].isIntersecting && !demoPlayed) {
+        demoPlayed = true;
+        demoEngine.play('getstarted');
+      }
+    }, { threshold: 0.3 });
+    demoObserver.observe(document.getElementById('demos'));
+
+    // ── Nav dark/light transition ────────────────────
+    var navWrapper = document.getElementById('navWrapper');
+    var heroSection = document.getElementById('heroSection');
+    var navObserver = new IntersectionObserver(function(entries) {
+      if (entries[0].isIntersecting) {
+        navWrapper.classList.add('nav-dark');
+        navWrapper.classList.remove('nav-light');
+      } else {
+        navWrapper.classList.remove('nav-dark');
+        navWrapper.classList.add('nav-light');
+      }
+    }, { threshold: 0, rootMargin: '-72px 0px 0px 0px' });
+    navObserver.observe(heroSection);
+
+    // ── Scroll-reveal animations ─────────────────────
+    if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      var fadeObserver = new IntersectionObserver(function(entries) {
+        entries.forEach(function(entry) {
+          if (entry.isIntersecting) {
+            entry.target.classList.add('visible');
+            fadeObserver.unobserve(entry.target);
+          }
+        });
+      }, { threshold: 0.15 });
+      document.querySelectorAll('.fade-up').forEach(function(el) {
+        fadeObserver.observe(el);
+      });
+    }
+
+    // ── Mobile sticky CTA bar ────────────────────────
+    var mobileCta = document.getElementById('mobileCta');
+    var heroCta = document.getElementById('heroCta');
+    if (mobileCta && heroCta) {
+      var ctaObserver = new IntersectionObserver(function(entries) {
+        if (entries[0].isIntersecting) {
+          mobileCta.classList.remove('visible');
+        } else {
+          mobileCta.classList.add('visible');
+        }
+      }, { threshold: 0 });
+      ctaObserver.observe(heroCta);
+    }
+
+    // ── FAQ toggle ───────────────────────────────────
+    document.querySelectorAll('.faq-card').forEach(function(card) {
+      card.addEventListener('click', function() {
+        this.classList.toggle('open');
+      });
+    });
+
+    // ── Smooth scroll ────────────────────────────────
+    document.querySelectorAll('.nav-links a').forEach(function(link) {
+      link.addEventListener('click', function(e) {
+        var target = document.querySelector(this.getAttribute('href'));
+        if (target) {
+          e.preventDefault();
+          var navHeight = navWrapper.offsetHeight;
+          var top = target.getBoundingClientRect().top + window.scrollY - navHeight - 16;
+          window.scrollTo({ top: top, behavior: 'smooth' });
+        }
+      });
+    });
+  </script>
 </body>
 </html>

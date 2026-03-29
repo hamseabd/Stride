@@ -10,13 +10,18 @@ from shared.models import User
 
 logger = Logger()
 
+_table = None
+
 
 def get_table():
-    """Return boto3 Table resource for the configured DynamoDB table."""
-    table_name = os.getenv("DYNAMODB_TABLE_NAME", "stride-local")
-    endpoint = os.getenv("AWS_ENDPOINT_URL")
-    kwargs = {"endpoint_url": endpoint} if endpoint else {}
-    return boto3.resource("dynamodb", region_name="us-east-1", **kwargs).Table(table_name)
+    """Return cached boto3 Table resource for the configured DynamoDB table."""
+    global _table
+    if _table is None:
+        table_name = os.getenv("DYNAMODB_TABLE_NAME", "stride-local")
+        endpoint = os.getenv("AWS_ENDPOINT_URL")
+        kwargs = {"endpoint_url": endpoint} if endpoint else {}
+        _table = boto3.resource("dynamodb", region_name="us-east-1", **kwargs).Table(table_name)
+    return _table
 
 
 def increment_rate_limit(user_id: str) -> int:
@@ -36,7 +41,7 @@ def increment_rate_limit(user_id: str) -> int:
         block legitimate users).
     """
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    now = datetime.now(timezone.utc).isoformat() + "Z"
+    now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
     try:
         resp = get_table().update_item(
             Key={
@@ -84,7 +89,7 @@ def record_consent(user_id: str, phone: str) -> bool:
     Write USER#{user_id} / CONSENT#SMS with consented_at and status="active".
     Returns True on success, False on error.
     """
-    now = datetime.now(timezone.utc).isoformat() + "Z"
+    now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
     try:
         get_table().put_item(Item={
             "pk": f"USER#{user_id}",
@@ -106,7 +111,7 @@ def revoke_consent(user_id: str) -> bool:
     Set status="revoked" on the CONSENT#SMS record.
     Returns True on success, False on error.
     """
-    now = datetime.now(timezone.utc).isoformat() + "Z"
+    now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
     try:
         get_table().update_item(
             Key={"pk": f"USER#{user_id}", "sk": "CONSENT#SMS"},
@@ -146,7 +151,7 @@ def record_proactive_consent(user_id: str) -> bool:
     GSI1: gsi1pk="PROACTIVE#ACTIVE", gsi1sk="USER#{user_id}"
     Returns True on success, False on error.
     """
-    now = datetime.now(timezone.utc).isoformat() + "Z"
+    now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
     try:
         get_table().put_item(Item={
             "pk": f"USER#{user_id}",
@@ -169,7 +174,7 @@ def revoke_proactive_consent(user_id: str) -> bool:
     Set status=revoked on CONSENT#PROACTIVE and remove GSI keys.
     Returns True on success, False on error.
     """
-    now = datetime.now(timezone.utc).isoformat() + "Z"
+    now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
     try:
         get_table().update_item(
             Key={"pk": f"USER#{user_id}", "sk": "CONSENT#PROACTIVE"},
@@ -208,14 +213,17 @@ def get_consented_users() -> list[str]:
 # Outbound message logging
 # ---------------------------------------------------------------------------
 
-def log_outbound(user_id: str, body: str, message_type: str) -> str | None:
+def log_outbound(user_id: str, body: str, message_type: str, local_date: str = "") -> str | None:
     """
     Log an outbound proactive message.
     DynamoDB: USER#{user_id} / OUTBOUND#{iso_timestamp}
+    local_date: "YYYY-MM-DD" in user's timezone (for dedup). If empty, uses UTC date.
     Returns the SK on success (for replied_at tracking), None on error.
     """
-    now = datetime.now(timezone.utc).isoformat() + "Z"
+    now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
     sk = f"OUTBOUND#{now}"
+    if not local_date:
+        local_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     try:
         get_table().put_item(Item={
             "pk": f"USER#{user_id}",
@@ -223,6 +231,7 @@ def log_outbound(user_id: str, body: str, message_type: str) -> str | None:
             "body": body,
             "message_type": message_type,
             "sent_at": now,
+            "local_date": local_date,
         })
         logger.info("Outbound logged", user_id=user_id, message_type=message_type)
         return sk
@@ -255,7 +264,7 @@ def set_outbound_replied(user_id: str, outbound_sk: str) -> bool:
     Set replied_at on an outbound record (for tone derivation latency tracking).
     Returns True on success, False on error.
     """
-    now = datetime.now(timezone.utc).isoformat() + "Z"
+    now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
     try:
         get_table().update_item(
             Key={"pk": f"USER#{user_id}", "sk": outbound_sk},
@@ -268,19 +277,21 @@ def set_outbound_replied(user_id: str, outbound_sk: str) -> bool:
         return False
 
 
-def get_todays_outbound(user_id: str, date_str: str) -> list[dict]:
+def get_todays_outbound(user_id: str, local_date: str) -> list[dict]:
     """
-    Get all outbound records for a user on a given date (for deduplication).
-    date_str: "YYYY-MM-DD" in user's local timezone.
+    Get all outbound records for a user on a given local date (for deduplication).
+    local_date: "YYYY-MM-DD" in user's local timezone.
+    Filters on the local_date attribute, not the UTC SK prefix.
     Returns list of outbound items, empty list on error.
     """
     try:
-        from boto3.dynamodb.conditions import Key
+        from boto3.dynamodb.conditions import Key, Attr
         resp = get_table().query(
             KeyConditionExpression=(
                 Key("pk").eq(f"USER#{user_id}")
-                & Key("sk").begins_with(f"OUTBOUND#{date_str}")
+                & Key("sk").begins_with("OUTBOUND#")
             ),
+            FilterExpression=Attr("local_date").eq(local_date),
         )
         return resp.get("Items", [])
     except Exception as e:
@@ -399,7 +410,7 @@ def log_blocked_attempt(user_id: str, reason: str, message_preview: str) -> None
         reason:          Why the message was blocked ("empty", "too_long", "rate_limit").
         message_preview: The raw message — only the first 100 chars are stored.
     """
-    now = datetime.now(timezone.utc).isoformat() + "Z"
+    now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
     try:
         get_table().put_item(Item={
             "pk": f"USER#{user_id}",
@@ -426,8 +437,7 @@ def get_conversation(user_id: str) -> list:
     Load the current conversation history for a user.
     Returns the stored messages list, or empty list if none exists.
 
-    Weekly reset: if today is the user's planning day and we haven't
-    reset yet today, clear the history (fresh start for the week).
+    The 20-turn cap in save_conversation prevents unbounded growth.
 
     Returns empty list on error (fail open).
     """
@@ -439,45 +449,51 @@ def get_conversation(user_id: str) -> list:
         if not item:
             return []
 
-        planning_day = int(item.get("planning_day", 1))
-        user_tz_str = item.get("user_timezone", "America/New_York")
-        try:
-            user_tz = ZoneInfo(user_tz_str)
-        except Exception:
-            user_tz = ZoneInfo("America/New_York")
-
-        last_reset = item.get("last_reset_date", "")
-        now_local = datetime.now(user_tz)
-        today = now_local.strftime("%Y-%m-%d")
-        weekday = now_local.isoweekday()  # 1=Monday, 7=Sunday
-
-        if weekday == planning_day and last_reset != today:
-            logger.info("Weekly conversation reset", user_id=user_id)
-            get_table().update_item(
-                Key={"pk": f"USER#{user_id}", "sk": "CONVERSATION#CURRENT"},
-                UpdateExpression="SET messages = :empty, last_reset_date = :today",
-                ExpressionAttributeValues={":empty": "[]", ":today": today},
-            )
-            return []
-
         messages_json = item.get("messages", "[]")
         loaded = json.loads(messages_json) if isinstance(messages_json, str) else messages_json
 
-        # Validate: strip any orphaned tool_result messages at the start
-        # (tool_result without a preceding assistant tool_use causes API 400)
+        # Validate: strip ALL tool_result blocks from user messages and
+        # ALL tool_use blocks from assistant messages. This prevents the
+        # "unexpected tool_use_id" API 400 error caused by orphaned pairs.
         tool_result_types = {"toolResult", "tool_result"}
+        tool_use_types = {"toolUse", "tool_use"}
         validated = []
         for msg in loaded:
             if not isinstance(msg, dict):
                 continue
             role = msg.get("role", "")
             content = msg.get("content", [])
-            if role == "user" and isinstance(content, list) and all(
-                isinstance(c, dict) and c.get("type") in tool_result_types for c in content
-            ):
-                continue  # drop orphaned tool_result messages
-            validated.append(msg)
-        return validated
+            if not isinstance(content, list):
+                validated.append(msg)
+                continue
+            if role == "user":
+                cleaned = [c for c in content if not (isinstance(c, dict) and c.get("type") in tool_result_types)]
+                if not cleaned:
+                    continue  # entire message was tool_results — drop it
+                validated.append({"role": "user", "content": cleaned})
+            elif role == "assistant":
+                cleaned = [c for c in content if not (isinstance(c, dict) and c.get("type") in tool_use_types)]
+                if not cleaned:
+                    continue  # entire message was tool_uses — drop it
+                validated.append({"role": "assistant", "content": cleaned})
+            else:
+                validated.append(msg)
+
+        # Enforce user/assistant alternation — merge or drop consecutive same-role messages
+        alternated = []
+        for msg in validated:
+            if alternated and msg.get("role") == alternated[-1].get("role"):
+                # Same role twice in a row — merge content into the previous message
+                prev = alternated[-1]
+                prev_content = prev.get("content", [])
+                new_content = msg.get("content", [])
+                if isinstance(prev_content, list) and isinstance(new_content, list):
+                    prev["content"] = prev_content + new_content
+                # If either is a string, just keep the previous one
+                continue
+            alternated.append(msg)
+
+        return alternated
     except Exception as e:
         logger.error("get_conversation failed — returning empty", error=str(e), user_id=user_id)
         return []
@@ -497,23 +513,24 @@ def save_conversation(user_id: str, messages: list, planning_day: int = 1, user_
 
         stripped = []
         for msg in messages:
-            if isinstance(msg, dict):
-                role = msg.get("role", "")
-                if role == "user":
-                    content = msg.get("content", [])
-                    if isinstance(content, list) and all(
-                        isinstance(c, dict) and c.get("type") in tool_types_result for c in content
-                    ):
-                        continue
+            if not isinstance(msg, dict):
+                continue
+            role = msg.get("role", "")
+            content = msg.get("content", [])
+            if role == "user":
+                if isinstance(content, list):
+                    cleaned = [c for c in content if not (isinstance(c, dict) and c.get("type") in tool_types_result)]
+                    if cleaned:
+                        stripped.append({"role": "user", "content": cleaned})
+                elif isinstance(content, str):
                     stripped.append(msg)
-                elif role == "assistant":
-                    content = msg.get("content", [])
-                    if isinstance(content, list):
-                        text_only = [c for c in content if not (isinstance(c, dict) and c.get("type") in tool_types_use)]
-                        if text_only:
-                            stripped.append({"role": "assistant", "content": text_only})
-                    elif isinstance(content, str):
-                        stripped.append(msg)
+            elif role == "assistant":
+                if isinstance(content, list):
+                    cleaned = [c for c in content if not (isinstance(c, dict) and c.get("type") in tool_types_use)]
+                    if cleaned:
+                        stripped.append({"role": "assistant", "content": cleaned})
+                elif isinstance(content, str):
+                    stripped.append(msg)
 
         if len(stripped) > 20:
             stripped = stripped[-20:]
@@ -523,7 +540,7 @@ def save_conversation(user_id: str, messages: list, planning_day: int = 1, user_
             stripped = stripped[2:]
             messages_json = json.dumps(stripped)
 
-        now = datetime.now(timezone.utc).isoformat() + "Z"
+        now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
         try:
             user_tz = ZoneInfo(user_timezone)
         except Exception:
@@ -559,10 +576,10 @@ def store_feedback(user_id: str, text: str, source: str) -> None:
         PK: USER#{user_id}
         SK: FEEDBACK#{iso_timestamp}
 
-    source: "keyword" (user typed FEEDBACK ...) | "agent" (agent-prompted after review)
+    source: "keyword" (user typed FEEDBACK ...) | "agent" (agent-prompted) | "classifier" (Haiku intent detection)
     Errors are swallowed — a logging failure must not surface to the user.
     """
-    now = datetime.now(timezone.utc).isoformat() + "Z"
+    now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
     try:
         get_table().put_item(Item={
             "pk": f"USER#{user_id}",

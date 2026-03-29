@@ -1,4 +1,4 @@
-.PHONY: up down build push deploy test chat logs-sms logs-scheduler feedback feedback-user deploy-site
+.PHONY: up down build push deploy test chat logs-sms logs-scheduler feedback feedback-user deploy-site analyze analyze-cost analyze-quality analyze-week
 
 # ── Config ────────────────────────────────────────────────────────────────────
 TABLE ?= stride-prod
@@ -34,6 +34,19 @@ logs-sms:
 
 logs-scheduler:
 	aws logs tail /aws/lambda/stride-scheduler --follow
+
+# ── Analytics (queries CloudWatch Logs Insights) ─────────────────────────
+analyze:
+	cd scrumbot-app && PYTHONPATH=. .venv/bin/python ../scripts/analyze.py --all
+
+analyze-cost:
+	cd scrumbot-app && PYTHONPATH=. .venv/bin/python ../scripts/analyze.py --cost
+
+analyze-quality:
+	cd scrumbot-app && PYTHONPATH=. .venv/bin/python ../scripts/analyze.py --quality
+
+analyze-week:
+	cd scrumbot-app && PYTHONPATH=. .venv/bin/python ../scripts/analyze.py --all --hours 168
 
 # ── Feedback (dev tool — scan is acceptable here, not a Lambda path) ──────────
 feedback:

@@ -91,25 +91,34 @@ framework runs entirely under the hood; users never see it.
 | Sprint 0 — Jupyter notebooks, proof of concept | ✅ Done |
 | Sprint 1 — Terraform, Lambda stubs, SMS migration | ✅ Done |
 | Sprint 2 — Real handlers, consent flow, onboarding, deploy | ✅ Done |
-| Phase 3 — Proactive outbound SMS (scheduler Lambda, proactive consent, morning/evening/weekly messages) | ⏳ **Next** |
+| Phase 3 — Proactive outbound SMS (scheduler, consent, tone derivation) | ✅ Done |
+| Phase 4 — Deploy + smoke test | ✅ Done |
+| Phase 5 — Production observability (telemetry, validation, analysis) | ✅ Done |
+| v1.1 — Coaching tone overhaul (prompt, onboarding, context, scheduler) | ✅ Done |
 
-- stride-sms is the only Lambda. stride-checkin and stride-agent removed.
-- 19 tools, 104 tests pass against LocalStack.
-- Twilio A2P 10DLC: resubmitted after initial rejection. Awaiting approval (up to 3 weeks).
+- Two Lambdas live: `stride-sms` (POST /sms) and `stride-scheduler` (EventBridge every 15 min).
+- 19 tools, 188 tests pass against LocalStack.
+- Twilio A2P 10DLC: approved (2026-03-23).
 - Legal pages (privacy policy, ToS) published on S3.
-- **Next action: build Phase 3** — proactive messaging transforms Stride from chatbot to coach.
+- Agent telemetry: tokens, latency, cost, cache hits logged per call.
+- Response validation: jargon, length, empty checks before every send.
+- **Next action: invite beta users** — system is ready.
 
-See `status.md` for detailed infrastructure state and `roadmap.md` for Phase 3 spec.
+See `docs/status.md` for detailed infrastructure state and `roadmap.md` for product evolution.
 
 ---
 
 ## REPO CONVENTIONS
 - `scrumbot-infra/`: Terraform only, serverless.tf modules, no raw `aws_lambda_function` resources
 - `scrumbot-app/`: Python only, no Terraform
-  - `/functions/sms/` — stride-sms Lambda handler (`handler.py`)
-  - `/shared/` — `tools.py`, `db.py`, `models.py`, `prompt.py`, `guards.py`, `classifier.py`
+  - `/functions/sms/` — stride-sms Lambda handler
+  - `/functions/scheduler/` — stride-scheduler Lambda handler (EventBridge, proactive SMS)
+  - `/shared/` — `tools.py`, `db.py`, `models.py`, `prompt.py`, `guards.py`, `classifier.py`, `sms.py`, `validators.py`
+- `scripts/` — deployment and analysis scripts (`build_and_push.sh`, `deploy_site.sh`, `analyze.py`)
+- `docs/` — `status.md`, legal docs
 - All Strands tools defined in `shared/tools.py`, never inline
 - Lambda Powertools decorator pattern on every handler
+- Structured telemetry via Powertools Logger — `agent_metrics`, `classifier_metrics`, `scheduler_metrics`, `validation_warning`
 - Terraform state: S3 backend (`stride-tf-state`) + DynamoDB lock table (`stride-tf-locks`)
 - GitHub Actions workflow: `.github/workflows/terraform.yml` (repo root)
 - Local dev tools (`chat.py`, `local_server.py`, `requirement-dev.txt`) are gitignored — local only
@@ -123,7 +132,7 @@ See `status.md` for detailed infrastructure state and `roadmap.md` for Phase 3 s
 - Give clear recommendations with a one-line rationale
 - No "it depends" without a concrete default
 - Read `status.md` at the start of a session to understand current state
-- Reference `DataDesign.md` for all schema questions — it is the locked source of truth
+- Reference `scrumbot-app/CLAUDE.md` for all schema questions — it is the locked source of truth
 
 **When asked to PLAN → produce:**
 - Prioritized backlog with acceptance criteria
@@ -132,7 +141,7 @@ See `status.md` for detailed infrastructure state and `roadmap.md` for Phase 3 s
 
 **When asked to ARCHITECT → produce:**
 - Mermaid diagram
-- DynamoDB access patterns (PK/SK + GSI) per DataDesign.md
+- DynamoDB access patterns (PK/SK + GSI) per scrumbot-app/CLAUDE.md
 - Lambda function map (name, path, trigger, tools, Powertools decorators)
 - API contracts (method, path, request, response, errors)
 
@@ -149,7 +158,7 @@ See `status.md` for detailed infrastructure state and `roadmap.md` for Phase 3 s
 8. Nothing ships without a definition of done
 9. Personal AWS account — flag anything that risks unexpected cost spikes
 10. No "ScrumBot", "sprint" (user-facing), "story", "standup", or "Fibonacci" anywhere — Stride only
-11. All inbound SMS passes the full 15-step guard chain before reaching the agent (see stride.md for full chain)
+11. All inbound SMS passes the full guard chain before reaching the agent (see scrumbot-app/CLAUDE.md SMS handler flow)
 12. Per-user rate limit: 50 messages/day, enforced via atomic DynamoDB counter (fails open on DB error)
 13. Blocked attempts logged under `USER#{user_id}/BLOCKED#{timestamp}` with reason included
 14. History passed to the agent is capped at 20 turns — no unbounded context growth

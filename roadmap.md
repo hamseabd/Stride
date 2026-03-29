@@ -2,9 +2,9 @@
 
 ## Context
 
-Stride is deployed and live (Sprint 2 complete). A2P 10DLC campaign in review (up to 3 weeks). This roadmap defines the full product evolution: individual beta → team version → payments.
+Stride is deployed and live (through v1.1). A2P 10DLC approved (2026-03-23). v1.1 coaching tone overhaul complete. This roadmap defines the full product evolution: individual beta → team version → payments.
 
-**Timeline:** 3 weeks to build while waiting for Twilio approval. Beta starts when A2P is live.
+**Status:** Beta-ready. All infrastructure, observability, and coaching improvements shipped.
 
 ---
 
@@ -16,7 +16,7 @@ Stride is deployed and live (Sprint 2 complete). A2P 10DLC campaign in review (u
 | Team timing | After beta, not during | Research showed 6/13 tools + all 7 db.py functions need changes. Better to ship a great individual product than a half-baked team one. |
 | Team identity | Second Twilio number (shared for all teams) | Industry standard: one number = one context. $1.15/mo. No in-band context switching. |
 | Team/personal overlap | Pick one per phone number | If you're on a team, that number is team-only. Want personal? Use the individual Stride number separately. |
-| Conversation memory | Reset Monday (planning day) after review data is stored | 20 turns lasts a full week. Agent still has all data via tools. Matches Stride's weekly rhythm. |
+| Conversation memory | Rolling 20-turn cap (no weekly reset) | Agent has all data via tools. 20-turn cap handles trimming. Weekly reset removed in v1.1. |
 | Weekly rhythm | Spread across week: Fri=review, Mon=plan, Wed=adjust, daily=check-in | Different mindsets on different days. Friday reflects, Monday plans fresh. |
 | Capacity language | Time-based, never expose points | "3 days of work" not "15 pts." Points run under the hood, users see time. |
 | Prioritization | Capacity-aware, plain language | "That's 7 days of work for a 5-day week. What can wait?" |
@@ -161,13 +161,15 @@ curl localhost:8000/test-scheduler
 | **Phase 1** | Foundation (models, tools, conversation memory, chat.py, tests) | Day 1 | ~1 day | ✅ DONE |
 | **Phase 2** | Feedback + Onboarding | Day 2-3 | ~2 days | ✅ DONE |
 | **Consolidation** | Single Lambda (stride-sms only) | — | ~1 hour | ✅ DONE |
-| **Phase 3** | Proactive Messaging | Day 4-8 | ~5 days | ⏳ **Next** |
-| **Phase 4** | Polish + Deploy | Day 9-12 | ~4 days | — |
+| **Phase 3** | Proactive Messaging | Day 4-8 | ~5 days | ✅ DONE |
+| **Phase 4** | Polish + Deploy | Day 9-12 | ~4 days | ✅ DONE |
+| **Phase 5** | Production Observability | Day 13 | ~1 day | ✅ DONE |
+| **v1.1** | Coaching Tone Overhaul | Day 14-15 | ~2 days | ✅ DONE |
 | **Beta** | 10 free users | After A2P approval, ~1 month | — | — |
 | **Sprint 4** | Team Version | After beta | ~14 days | — |
 | **Sprint 5** | Payments (Stripe) | After team validated | ~10 days | — |
 
-**Known bugs:** 0 — BUG-001 fixed in Phase 2. See `bugfix.md`.
+**Known bugs:** 0 — BUG-001 fixed in Phase 2.
 
 ### Phase 0 — Pre-Build Fixes ✅ DONE
 
@@ -197,7 +199,7 @@ All 5 fixes applied. See `phase0-fixes.md`.
 - `CONVERSATION#CURRENT` DynamoDB entity per user
 - `get_conversation()` / `save_conversation()` in `db.py`
 - Tool payloads stripped, capped at 20 turns, 350KB safety check
-- Timezone-aware weekly reset on user's `planning_day`
+- 20-turn cap handles trimming (weekly reset removed in v1.1)
 - **Files:** `shared/db.py`, `functions/sms/handler.py`
 
 #### 2. User Preferences ✅ DONE
@@ -351,10 +353,6 @@ During Monday planning, Stride:
 
 Users can add new projects anytime. Stride creates them immediately and includes them in the next planning session.
 
-### Conversation Reset Timing
-
-Conversation resets **Monday morning** (user's `planning_day`). This is after Friday's review data has been stored in DynamoDB (velocity, patterns, blockers). Monday's planning session starts fresh but has full access to all data via tools.
-
 #### 10. Infrastructure (Terraform)
 
 - New `eventbridge.tf`: Scheduler rule (rate: 15 min) → stride-scheduler Lambda
@@ -370,7 +368,7 @@ Conversation resets **Monday morning** (user's `planning_day`). This is after Fr
 
 #### 11. Testing + Edge Cases
 
-- Conversation memory: test 20-turn cap, weekly reset, tool call stripping
+- Conversation memory: test 20-turn cap, tool call stripping
 - Proactive messaging: test timezone math, deduplication, consent flows
 - Feedback: test keyword path and agent-prompted path
 - Onboarding: test full flow end-to-end (new user → project → first check-in)
@@ -390,6 +388,28 @@ Conversation resets **Monday morning** (user's `planning_day`). This is after Fr
 - Developer reads feedback via `make feedback`
 - Watch CloudWatch logs for errors, latency, cost spikes
 - Key metrics to track: messages/user/day, check-in completion rate, which proactive messages get replies
+
+---
+
+## Post-Beta Improvements (backlog)
+
+Deferred items identified during code review. Not blocking beta launch.
+
+**Scheduler enhancements:**
+- Inactive user nudge — detect users who haven't replied in X days, send a re-engagement message. Requires: inactivity detection logic + new `"nudge"` message type + `_build_nudge()` builder.
+- Scheduler message length budget — build messages that fit within 480 chars instead of relying on `send_sms` truncation which can cut mid-word.
+- GSI pagination in `get_consented_users()` — currently returns only the first 1MB page. Will silently miss users beyond ~1000.
+- Per-user timeout in scheduler — prevent one user with large data from consuming the full Lambda timeout.
+- Log warnings on silent timezone/time-preference fallbacks.
+
+**Observability:**
+- Langfuse integration (OTEL with Strands SDK) — deferred until post-beta.
+- Strands Evals — CI quality gates with Haiku judge.
+- CloudWatch Alarms — only if log-based analysis proves insufficient.
+
+**Code quality:**
+- Model ID and cost rates as environment variables instead of hardcoded.
+- Consolidate `_twiml` safety-net truncation (1600) with validator truncation (480) into a single path.
 
 ---
 
@@ -513,9 +533,9 @@ Tools that need team-awareness: `create_project`, `list_active_projects`, `creat
 
 ### Pricing
 
-- Individual: $12/mo
-- Team: $12/seat/mo (admin pays, Stripe quantity = member_count including admin)
-- 5-person team = $60/mo, 10-person team = $120/mo
+- Individual: $15/mo (14-day free trial, no card upfront)
+- Team: TBD after beta
+- Beta: free for all users
 
 ### Feature Gating (decided after beta feedback)
 
@@ -539,17 +559,17 @@ Will decide what goes behind paywall after seeing what beta users value.
 
 | Feature | Status | Phase |
 |---------|--------|-------|
-| Inbound SMS + 10-step guard chain | ✅ Done | — |
+| Inbound SMS + 14-step guard chain | ✅ Done | — |
 | Lambda container image + ECR deploy (stride-sms only) | ✅ Done | deploy plan |
 | CI/CD (GitHub Actions OIDC) | ✅ Done | — |
 | 19 Strands tools | ✅ Done | Phase 0 + 1 + 2 |
-| DynamoDB single-table (14 entities, 1 GSI) | ✅ Done | Phase 0 + 1 |
+| DynamoDB single-table (16 entities, 1 GSI) | ✅ Done | Phase 0 + 1 + 3 |
 | `create_project` target_date param | ✅ Done | Phase 0 |
 | `list_active_projects` returns target_date | ✅ Done | Phase 0 |
 | `update_project` tool | ✅ Done | Phase 0 |
 | `set_user_preference` tool | ✅ Done | Phase 0 |
 | SMS handler max_tokens (512 → 1024) | ✅ Done | Phase 0 |
-| Conversation memory (per-user, weekly reset) | ✅ Done | Phase 1 |
+| Conversation memory (per-user, 20-turn cap) | ✅ Done | Phase 1 |
 | Goal model (target_date + decomposition prompt) | ✅ Done | Phase 1 |
 | Habit model + tools (create, complete, list) | ✅ Done | Phase 1 |
 | Data moat fields (4 schema additions) | ✅ Done | Phase 1 |
@@ -557,17 +577,21 @@ Will decide what goes behind paywall after seeing what beta users value.
 | Frequency-aware habit streaks | ✅ Done | Phase 1 |
 | User preferences (timezone, times, planning_day) | ✅ Done | Phase 1 |
 | chat.py SMS simulator | ✅ Done | Phase 1 |
-| Unit + integration test suite (104 tests) | ✅ Done | Phase 1 |
+| Unit + integration test suite (191 tests) | ✅ Done | Phase 1-5 |
 | BUG-001: preferred_tone reset fix | ✅ Done | Phase 2 |
 | Feedback collection (keyword + tool + make command) | ✅ Done | Phase 2 |
 | Better onboarding + HELP | ✅ Done | Phase 2 |
 | Tone adaptation — preferred_tone bug fix | ✅ Done | Phase 2 |
 | /test-scheduler scaffold endpoint | ✅ Done | Phase 2 |
-| Outbound SMS helper (shared/sms.py) | — Phase 3 | Phase 3 |
-| Proactive consent (CONSENT#PROACTIVE, TCPA) | — Phase 3 | Phase 3 |
-| EventBridge scheduler Lambda | — Phase 3 | Phase 3 |
-| Morning/evening/weekly proactive messages | — Phase 3 | Phase 3 |
-| Tone derivation (latency tracking + heuristics) | — Phase 3 | Phase 3 |
+| Outbound SMS helper (shared/sms.py) | ✅ Done | Phase 3 |
+| Proactive consent (CONSENT#PROACTIVE, TCPA) | ✅ Done | Phase 3 |
+| EventBridge scheduler Lambda | ✅ Done | Phase 3 |
+| Morning/evening/weekly proactive messages | ✅ Done | Phase 3 |
+| Tone derivation (latency tracking + heuristics) | ✅ Done | Phase 3 |
+| Agent telemetry (tokens, latency, cost, cache) | ✅ Done | Phase 5 |
+| Response validation (jargon, length, empty) | ✅ Done | Phase 5 |
+| Intent classifier (Haiku) | ✅ Done | v1.1 |
+| Coaching tone overhaul (prompt, onboarding, context) | ✅ Done | v1.1 |
 | Team data model + tools | — Sprint 4 | Sprint 4 |
 | Second Twilio number | — Sprint 4 | Sprint 4 |
 | Admin capabilities + summaries | — Sprint 4 | Sprint 4 |

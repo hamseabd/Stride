@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal
 
 from boto3.dynamodb.conditions import Key
@@ -357,7 +357,7 @@ def update_task_status(task_id: str, status: str) -> dict:
         pk = item["pk"]
         sk = item["sk"]
         previous_status = item.get("status", "todo")
-        updated_at = datetime.utcnow().isoformat() + "Z"
+        updated_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
         table.update_item(
             Key={"pk": pk, "sk": sk},

@@ -1,5 +1,5 @@
 # Stride — Project Status
-Last updated: 2026-03-12
+Last updated: 2026-03-25
 
 ---
 
@@ -19,14 +19,16 @@ users never see it. Plain language only.
 |---|---|---|
 | **Sprint 0** | ✅ Done | Jupyter notebooks — proved Strands agent + tools + DynamoDB |
 | **Sprint 1** | ✅ Done | Renamed to Stride, Terraform written, Lambda stubs, SMS migration |
-| **Sprint 2** | ✅ Done | Real handlers, consent flow, onboarding, all 3 endpoints live |
+| **Sprint 2** | ✅ Done | Real handlers, consent flow, onboarding, 2 Lambdas deployed |
 | **Sprint 3 Phase 0** | ✅ Done | Pre-build fixes (target_date, update_project, set_user_preference, max_tokens) |
 | **Sprint 3 Phase 1** | ✅ Done | Conversation memory, habits, data moat fields, chat.py, 104 tests |
 | **Sprint 3 Phase 2** | ✅ Done | Feedback collection, better onboarding, BUG-001 fix, /test-scheduler scaffold |
 | **Sprint 3 Phase 3** | ✅ Done | Proactive outbound SMS (scheduler Lambda, proactive consent, tone derivation) |
 | **Sprint 3 Phase 4** | ✅ Done | Deploy + smoke test, all Lambdas live |
+| **Phase 5** | ✅ Done | Production observability — agent/classifier/scheduler telemetry, response validation, analysis tooling |
+| **v1.1** | ✅ Done | Coaching tone overhaul — system prompt, onboarding, context builder, scheduler messages, conversation reset removed |
 
-**Current state:** Deployed. Two Lambdas live: `stride-sms` (POST /sms) and `stride-scheduler` (EventBridge every 15 min). A2P 10DLC approved. Ready for beta.
+**Current state:** Deployed. Two Lambdas live: `stride-sms` (POST /sms) and `stride-scheduler` (EventBridge every 15 min). A2P 10DLC approved. Observability instrumented. v1.1 coaching tone shipped. Ready for beta.
 
 ---
 
@@ -111,35 +113,68 @@ users never see it. Plain language only.
 - `increment_rate_limit(user_id)` — atomic ADD counter, fail open
 - `log_blocked_attempt(user_id, reason, preview)` — writes `BLOCKED#{timestamp}`
 - `get_consent / record_consent / revoke_consent` — TCPA SMS consent
+- `get_proactive_consent / record_proactive_consent / revoke_proactive_consent` — TCPA proactive consent (separate from SMS consent)
+- `get_consented_users()` — GSI query for all active proactive consent users
 - `get_or_create_user(user_id, phone)` — race-safe conditional PutItem
 - `set_onboarded(user_id)` — sets `onboarded=True`
 - `get_conversation / save_conversation` — per-user history persistence (`CONVERSATION#CURRENT`)
 - `store_feedback(user_id, body, source)` — writes `FEEDBACK#{iso}` record
+- `log_outbound / get_latest_outbound / set_outbound_replied` — outbound message tracking
+- `get_todays_outbound / get_outbound_since` — dedup + tone derivation queries
+- `update_preferred_tone(user_id, tone)` — updates `PATTERN#AGGREGATE.preferred_tone`
 
 ### `guards.py` ✅
 - `check_message(message)` — `None` (pass), `"empty"`, or `"too_long"` (>500 chars)
 - `check_rate_limit(user_id, limit=50)` — `True` if over daily limit
 
 ### `prompt.py` ✅
-Single-source `STRIDE_SYSTEM_PROMPT`. Covers all 5 session types, estimate rules, plain language rules. Injects `preferred_tone` per user.
+Single-source `STRIDE_SYSTEM_PROMPT`. Covers all 5 session types, estimate rules, plain language rules. Injects `preferred_tone` per user. Includes `PROMPT_VERSION` constant for correlating quality changes with prompt edits.
+
+### `classifier.py` ✅
+Intent classification using Claude Haiku (`claude-haiku-4-5-20251001`). Classifies inbound SMS into: `feedback`, `remind_me`, `no_reminders`, `help`, `conversation`. Uses raw Anthropic SDK (not Strands) for cost — ~$0.001/call. Logs `classifier_metrics` (latency, tokens, intent) for production analysis.
+
+### `sms.py` ✅
+Twilio REST client wrapper. `send_sms(to, body) -> bool`. Hard cap at 480 chars (3 SMS segments). Lazy-init client. Never raises.
+
+### `validators.py` ✅
+Post-generation response validation. Pure Python (no LLM calls, zero latency). Checks:
+- Length: warns if >480 chars (limit) or >300 chars (target)
+- Jargon: catches "sprint", "story points", "standup", "fibonacci", "backlog items"
+- Size labels: catches raw XL leaking to users
+- Empty response: flags for fallback to error reply
+
+Logs `validation_warning` events for production analysis. Never blocks — warnings only.
 
 ---
 
 ## Lambda handlers (`scrumbot-app/functions/`)
 
 ### `sms/handler.py` — `POST /sms` ✅
-The only Lambda. Full guard chain:
+Full guard chain:
 1. Twilio signature validation → 403 if invalid
 2. Parse `From` (user_id) + `Body`
 3. `check_message()` → block if empty or >500 chars
 4. `check_rate_limit()` → block if >50 msgs/day
-5. STOP keyword → revoke consent, unsubscribe reply
-6. HELP keyword → help text (includes FEEDBACK instructions), no agent
-6.5. FEEDBACK keyword → `store_feedback()`, instant ack, no consent required
-7. `get_consent()` → no consent: send opt-in prompt; YES reply: record consent + welcome
-8. `get_or_create_user()` → bootstrap `USER#` record
-9. Onboarding check → inject setup instructions if `user.onboarded=False` (one question at a time)
-10. Agent call → `_call_agent()`, truncate at 1600 chars at sentence boundary
+5. STOP keyword → revoke all consent (SMS + proactive), unsubscribe reply
+6. Consent check → no consent: send opt-in prompt; YES reply: record consent + welcome
+7. Haiku classifier → `feedback` / `remind_me` / `no_reminders` / `help` / `conversation`
+8. Intent routing → feedback stored, remind_me/no_reminders toggle proactive consent
+9. Track `replied_at` on latest outbound (for tone derivation)
+10. User bootstrap → `get_or_create_user()`
+11. Onboarding detection → auto-complete if projects already exist
+12. Agent call → `_call_agent()` with telemetry (logs `agent_metrics`)
+13. Response validation → `validate_response()` (jargon, length, empty checks)
+14. TwiML reply → truncate at 1600 chars at sentence boundary
+
+### `scheduler/handler.py` — EventBridge (every 15 min) ✅
+Proactive outbound SMS scheduler:
+1. Query GSI for users with active proactive consent
+2. For each user: timezone math → determine message type → dedup → build → send → log
+3. Message types: `monday_planning`, `morning_reminder`, `evening_checkin`, `midweek_adjust`, `friday_review`
+4. Morning/evening/midweek: pure Python formatting from DynamoDB data (no Claude call)
+5. Planning/review: context built from DynamoDB, pure Python formatting (no Claude call)
+6. Bi-weekly tone derivation on Friday review (reply latency → direct/encouraging/balanced)
+7. Logs `scheduler_metrics` (users processed, sent/error counts, run duration)
 
 ---
 
@@ -165,6 +200,8 @@ The only Lambda. Full guard chain:
 | Blocked log | `USER#{user_id}` | `BLOCKED#{iso_timestamp}` |
 | Conversation | `USER#{user_id}` | `CONVERSATION#CURRENT` |
 | Feedback | `USER#{user_id}` | `FEEDBACK#{iso_timestamp}` |
+| Proactive consent | `USER#{user_id}` | `CONSENT#PROACTIVE` |
+| Outbound message | `USER#{user_id}` | `OUTBOUND#{iso_timestamp}` |
 
 ---
 
@@ -212,7 +249,8 @@ All pages cover SMS opt-in/out, msg frequency (1-3/day), data rates, STOP/HELP, 
 | 1 | ~~**A2P approval**~~ | ✅ Approved 2026-03-23 |
 | 2 | ~~**Real SMS smoke test**~~ | ✅ Done 2026-03-23 |
 | 3 | ~~**Phase 3: Proactive messaging**~~ | ✅ Done 2026-03-23 |
-| 4 | **Invite beta users** — system is ready | — |
+| 4 | ~~**Phase 5: Production observability**~~ | ✅ Done 2026-03-25 |
+| 5 | **Invite beta users** — system is ready | — |
 
 ---
 
@@ -233,12 +271,18 @@ make deploy                        # build stride-sms image + push to ECR + terr
 make push                          # build + push only (no infra change)
 make deploy-site                   # deploy website to S3
 make up                            # local dev with LocalStack
-make test                          # run 104 tests
+make test                          # run 191 tests
+
+# Analytics (queries CloudWatch Logs Insights)
+make analyze                       # last 24h — agent, cost, quality, classifier, scheduler
+make analyze-cost                  # cost breakdown only
+make analyze-quality               # response quality report
+make analyze-week                  # last 7 days
 ```
 
 ---
 
-## Definition of Done — Sprint 2 + Consolidation + Sprint 3 (Phases 0-2)
+## Definition of Done — All Phases Through Phase 5
 
 - [x] stride-sms Lambda handles all user interaction — no stubs
 - [x] SMS opt-in consent flow enforced — no messages sent without YES reply
@@ -249,14 +293,22 @@ make test                          # run 104 tests
 - [x] CloudWatch shows structured JSON logs for stride-sms
 - [x] X-Ray traces present for stride-sms
 - [x] stride-checkin and stride-agent removed — single Lambda architecture
-- [x] Conversation memory — per-user, 20-turn cap, weekly reset, tool stripping
+- [x] Conversation memory — per-user, 20-turn cap, tool stripping
 - [x] Habit model — create, complete, list with frequency-aware streaks
 - [x] Data moat fields — status_changed_at, blocker category, active_project_count, preferred_tone
 - [x] Feedback collection — keyword + agent-prompted + make commands
 - [x] Better onboarding — one question at a time, explains weekly rhythm
 - [x] BUG-001 fixed — preferred_tone preserved during weekly review
-- [x] 104 tests passing
 - [x] Privacy Policy + Terms live at a public URL (S3 static site)
 - [x] A2P Campaign fully approved (2026-03-23)
-- [ ] Real SMS round-trip with opt-in flow works end-to-end
+- [x] Real SMS round-trip with opt-in flow works end-to-end (2026-03-23)
+- [x] Proactive outbound SMS — scheduler, consent, tone derivation (2026-03-23)
+- [x] Haiku intent classifier — routes feedback/remind_me/help before Sonnet (2026-03-25)
+- [x] Agent telemetry — tokens, latency, cost, cache hits logged per call (2026-03-25)
+- [x] Classifier telemetry — latency, tokens, intent logged per call (2026-03-25)
+- [x] Scheduler telemetry — users processed, sent/error counts, run duration (2026-03-25)
+- [x] Response validation — jargon, length, empty checks before send (2026-03-25)
+- [x] Prompt versioning — `PROMPT_VERSION` constant for correlation (2026-03-25)
+- [x] Analytics script — `make analyze` queries CloudWatch Logs Insights (2026-03-25)
+- [x] 191 tests passing
 - [ ] Beta users onboarded

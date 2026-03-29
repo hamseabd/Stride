@@ -1,6 +1,6 @@
 """Tests for Phase 3 — proactive consent, outbound logging, and scheduler logic."""
 
-from datetime import datetime
+from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
 from shared.db import (
@@ -94,7 +94,7 @@ class TestOutboundLogging:
 
     def test_get_todays_outbound(self, ddb, user_id):
         log_outbound(user_id, "Morning msg", "morning_reminder")
-        today = datetime.utcnow().strftime("%Y-%m-%d")
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         items = get_todays_outbound(user_id, today)
         assert len(items) == 1
         assert items[0]["message_type"] == "morning_reminder"

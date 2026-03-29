@@ -9,6 +9,7 @@ Logic:
   2. For each user: timezone math → determine message type → dedup → send → log
 """
 
+import time
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -103,14 +104,18 @@ def _is_already_sent(user_id: str, date_str: str, message_type: str) -> bool:
     return any(item.get("message_type") == message_type for item in todays)
 
 
+MAX_TASKS_IN_REMINDER = 5
+
+
 def _build_morning_reminder(user_id: str) -> str:
     """Build morning reminder from live DynamoDB data. No Claude call."""
     projects = list_active_projects(user_id=user_id)
     if "error" in projects or not projects.get("projects"):
-        return "Good morning! What are you working on today?"
+        return "Morning! What are you working on today?"
 
-    lines = ["Good morning! Today you planned:"]
+    lines = []
     task_count = 0
+    total_active = 0
 
     for project in projects["projects"]:
         cycle = project.get("active_cycle")
@@ -119,30 +124,41 @@ def _build_morning_reminder(user_id: str) -> str:
         cycle_data = get_cycle_data(cycle_id=cycle["cycle_id"])
         if "error" in cycle_data:
             continue
+
+        project_tasks = []
         for task in cycle_data.get("tasks", []):
             if task.get("status") in ("todo", "in_progress"):
-                label = ESTIMATE_LABELS.get(task.get("estimate_label", ""), "")
-                estimate_str = f" ({label})" if label else ""
-                lines.append(f"- {task.get('title', '?')}{estimate_str} - {project['name']}")
-                task_count += 1
+                total_active += 1
+                if task_count < MAX_TASKS_IN_REMINDER:
+                    label = ESTIMATE_LABELS.get(task.get("estimate_label", ""), "")
+                    estimate_str = f" ({label})" if label else ""
+                    project_tasks.append(f"- {task.get('title', '?')}{estimate_str}")
+                    task_count += 1
+
+        if project_tasks:
+            lines.append(f"{project['name']}:")
+            lines.extend(project_tasks)
 
     if task_count == 0:
-        return "Good morning! No tasks planned yet. Want to set some up?"
+        return "Morning! No tasks set for this week yet. Want to plan some?"
 
-    lines.append("Reply when you get started!")
-    return "\n".join(lines)
+    if total_active > MAX_TASKS_IN_REMINDER:
+        lines.append(f"...and {total_active - MAX_TASKS_IN_REMINDER} more")
+
+    lines.append("\nWhat are you tackling first?")
+    return "Morning! Here's your plan:\n" + "\n".join(lines)
 
 
 def _build_evening_checkin() -> str:
     """Static evening check-in prompt. No Claude call."""
-    return "How'd today go? Quick check-in: what did you get done?"
+    return "How'd today go? What did you get done?"
 
 
 def _build_midweek_adjust(user_id: str) -> str:
     """Midweek adjustment prompt with progress data. No Claude call."""
     projects = list_active_projects(user_id=user_id)
     if "error" in projects or not projects.get("projects"):
-        return "Mid-week check: how's the week going? Want to adjust your plan?"
+        return "Midweek \u2014 how's the week going? Want to adjust anything?"
 
     done_count = 0
     total_count = 0
@@ -160,41 +176,68 @@ def _build_midweek_adjust(user_id: str) -> str:
                 done_count += 1
 
     if total_count == 0:
-        return "Mid-week check: how's the week going? Want to adjust your plan?"
+        return "Midweek \u2014 how's the week going? Want to adjust anything?"
 
     return (
-        f"Mid-week check: you've finished {done_count} of {total_count} tasks so far. "
-        "On track, or want to adjust your plan?"
+        f"Midweek \u2014 {done_count} of {total_count} tasks done so far. "
+        "On track, or want to adjust?"
     )
 
 
-def _build_nudge() -> str:
-    """Static nudge for inactive users. No Claude call."""
-    return "Haven't heard from you in a while \u2014 everything ok? Text me when you're ready to pick back up."
-
-
 def _build_planning_prompt(user_id: str) -> str:
-    """Build context for Monday planning. Claude will generate the actual message."""
+    """Build context for Monday planning with last week's results + backlog. No Claude call."""
     projects = list_active_projects(user_id=user_id)
     if "error" in projects or not projects.get("projects"):
         return "New week! What are you focusing on?"
 
-    project_summaries = []
-    for p in projects["projects"]:
-        project_summaries.append(f"- {p['name']}" + (f" (due {p['target_date']})" if p.get("target_date") else ""))
+    # Split active vs backlog
+    done_count = 0
+    total_count = 0
+    active_lines = []
+    backlog_lines = []
 
-    return (
-        "New week! Here are your active projects:\n"
-        + "\n".join(project_summaries)
-        + "\nWhat are you focusing on this week?"
-    )
+    for p in projects["projects"]:
+        due = f" (due {p['target_date']})" if p.get("target_date") else ""
+        cycle = p.get("active_cycle")
+        if cycle:
+            active_lines.append(f"- {p['name']}{due}")
+            cycle_data = get_cycle_data(cycle_id=cycle["cycle_id"])
+            if "error" not in cycle_data:
+                for task in cycle_data.get("tasks", []):
+                    total_count += 1
+                    if task.get("status") == "done":
+                        done_count += 1
+        else:
+            backlog_lines.append(p["name"])
+
+    # Build header with last week's results
+    if total_count > 0:
+        header = f"New week! Last week you finished {done_count} of {total_count} tasks."
+    else:
+        header = "New week!"
+
+    parts = [header]
+
+    if active_lines:
+        parts.append("Your goals:\n" + "\n".join(active_lines))
+
+    # Surface backlog goals on planning day
+    if backlog_lines:
+        if len(backlog_lines) == 1:
+            parts.append(f"You also have '{backlog_lines[0]}' saved \u2014 want to plan that too?")
+        else:
+            names = ", ".join(f"'{n}'" for n in backlog_lines)
+            parts.append(f"You also have {names} saved \u2014 want to activate any of those?")
+
+    parts.append("What's the focus this week?")
+    return "\n".join(parts)
 
 
 def _build_review_prompt(user_id: str) -> str:
-    """Build context for Friday review. Claude will generate the actual message."""
+    """Build context for Friday review. No Claude call."""
     projects = list_active_projects(user_id=user_id)
     if "error" in projects or not projects.get("projects"):
-        return "Week's wrapping up. How did it go?"
+        return "Week's done \u2014 how did it go?"
 
     done_count = 0
     total_count = 0
@@ -212,8 +255,8 @@ def _build_review_prompt(user_id: str) -> str:
                 done_count += 1
 
     return (
-        f"Week's wrapping up. You finished {done_count} of {total_count} tasks. "
-        "What went well? What would you do differently?"
+        f"Week's done \u2014 you finished {done_count} of {total_count} tasks. "
+        "How do you feel about this week?"
     )
 
 
@@ -259,26 +302,36 @@ def _derive_tone(user_id: str, now_local: datetime) -> None:
                 avg_latency_min=round(avg_latency, 1), reply_rate=round(reply_rate, 2))
 
 
-def _process_user(user_id: str) -> None:
-    """Process a single user: determine message type, dedup, send."""
+def _process_user(user_id: str) -> bool:
+    """Process a single user: determine message type, dedup, send.
+
+    Returns True only when a message was actually sent.
+    """
     user = get_or_create_user(user_id=user_id, phone=user_id)
     if "error" in user:
         logger.error("Failed to get user", user_id=user_id)
-        return
+        return False
 
     if not user.get("onboarded", False):
-        return
+        logger.info("Skipping: not onboarded", user_id=user_id)
+        return False
 
     now_local = _get_user_local_time(user)
     date_str = now_local.strftime("%Y-%m-%d")
+    logger.info("Processing user",
+                user_id=user_id,
+                local_time=now_local.strftime("%H:%M"),
+                weekday=now_local.isoweekday(),
+                timezone=user.get("timezone", "?"))
 
     message_type = _determine_message_type(now_local, user)
     if not message_type:
-        return
+        logger.info("No message type for current window", user_id=user_id)
+        return False
 
     if _is_already_sent(user_id, date_str, message_type):
         logger.info("Dedup: already sent", user_id=user_id, message_type=message_type)
-        return
+        return False
 
     # Build message based on type
     if message_type == "morning_reminder":
@@ -293,30 +346,44 @@ def _process_user(user_id: str) -> None:
         body = _build_review_prompt(user_id)
         _derive_tone(user_id, now_local)
     else:
-        return
+        return False
 
     # Append opt-out footer
     body += _OPT_OUT_FOOTER
 
-    # Send and log
+    # Send and log (pass local_date for timezone-correct dedup)
     if send_sms(to=user_id, body=body):
-        log_outbound(user_id, body, message_type)
+        log_outbound(user_id, body, message_type, local_date=date_str)
         logger.info("Proactive message sent", user_id=user_id, message_type=message_type)
+        return True
     else:
         logger.error("Failed to send proactive message", user_id=user_id, message_type=message_type)
+        return False
 
 
 @logger.inject_lambda_context
 @tracer.capture_lambda_handler
 def handler(event: dict, context: LambdaContext) -> dict:
     """EventBridge entry point — process all consented users."""
+    t0 = time.monotonic()
     user_ids = get_consented_users()
     logger.info("Scheduler run", consented_users=len(user_ids))
 
+    sent_count = 0
+    error_count = 0
     for user_id in user_ids:
         try:
-            _process_user(user_id)
+            if _process_user(user_id):
+                sent_count += 1
         except Exception:
             logger.exception("Error processing user", user_id=user_id)
+            error_count += 1
+
+    run_duration_ms = round((time.monotonic() - t0) * 1000)
+    logger.info("scheduler_metrics",
+                users_processed=len(user_ids),
+                sent_count=sent_count,
+                error_count=error_count,
+                run_duration_ms=run_duration_ms)
 
     return {"statusCode": 200, "processed": len(user_ids)}

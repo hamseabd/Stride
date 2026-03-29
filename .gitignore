@@ -53,3 +53,5 @@ terraform.rc
 scrumbot-app/local_server.py
 scrumbot-app/requirement-dev.txt
 plan.md
+CEO/
+cost/

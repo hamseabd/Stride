@@ -17,6 +17,8 @@ def _env(monkeypatch):
 @pytest.fixture
 def ddb():
     """Mocked DynamoDB table matching production schema."""
+    import shared.db
+    shared.db._table = None  # reset singleton so moto's mock is picked up
     with mock_aws():
         client = boto3.client("dynamodb", region_name="us-east-1")
         client.create_table(

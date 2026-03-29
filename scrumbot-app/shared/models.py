@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from datetime import datetime
+from datetime import datetime, timezone
 import uuid
 
 
@@ -8,7 +8,7 @@ def _uuid() -> str:
 
 
 def _now() -> str:
-    return datetime.utcnow().isoformat() + "Z"
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 class User(BaseModel):
@@ -60,7 +60,7 @@ class Task(BaseModel):
 class Checkin(BaseModel):
     checkin_id: str = Field(default_factory=_uuid)
     user_id: str
-    date: str = Field(default_factory=lambda: datetime.utcnow().strftime("%Y-%m-%d"))
+    date: str = Field(default_factory=lambda: datetime.now(timezone.utc).strftime("%Y-%m-%d"))
     did: str
     doing: str
     blocked: str = ""
