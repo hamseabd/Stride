@@ -96,14 +96,15 @@ framework runs entirely under the hood; users never see it.
 | Phase 5 — Production observability (telemetry, validation, analysis) | ✅ Done |
 | v1.1 — Coaching tone overhaul (prompt, onboarding, context, scheduler) | ✅ Done |
 | v2.0 — Prompt & flow revision (onboarding, timezone, session context, decomposition) | ✅ Done |
+| v2.1 — Onboarding overhaul (adaptive flow, too-long handling, multi-goal, blocked visibility) | ✅ Done |
 
 - Two Lambdas live: `stride-sms` (POST /sms) and `stride-scheduler` (EventBridge every 15 min).
-- 19 tools, 219 tests pass against LocalStack.
+- 19 tools, 233 tests pass against LocalStack.
 - Twilio A2P 10DLC: approved (2026-03-23).
 - Legal pages (privacy policy, ToS) published on S3.
 - Agent telemetry: tokens, latency, cost, cache hits logged per call.
 - Response validation: jargon, length, empty checks before every send.
-- Prompt v2.0: timezone inference, session-aware context, on-demand goal decomposition.
+- Prompt v2.1: adaptive onboarding, graceful too-long handling, multi-goal support.
 - **Next action: invite beta users** — system is ready.
 
 See `docs/status.md` for detailed infrastructure state and `roadmap.md` for product evolution.

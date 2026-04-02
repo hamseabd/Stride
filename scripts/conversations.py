@@ -58,6 +58,15 @@ def get_projects(table, user_id):
     return resp.get("Items", [])
 
 
+def get_blocked(table, user_id):
+    """List blocked message attempts for a user."""
+    resp = table.query(
+        KeyConditionExpression="pk = :pk AND begins_with(sk, :sk)",
+        ExpressionAttributeValues={":pk": f"USER#{user_id}", ":sk": "BLOCKED#"},
+    )
+    return resp.get("Items", [])
+
+
 def get_feedback(table):
     """Scan for all feedback records."""
     resp = table.scan(
@@ -159,6 +168,35 @@ def print_conversation(messages, user_id, name=""):
         print()
 
 
+def print_blocked(blocked_items, user_id):
+    """Print blocked message attempts."""
+    if not blocked_items:
+        return
+
+    print(f"  Blocked messages ({len(blocked_items)}):")
+    for b in blocked_items:
+        reason = b.get("reason", "?")
+        at = b.get("created_at", "?")[:19]
+        preview = b.get("message_preview", "(no preview)")
+        # Show full message, wrapped
+        lines = []
+        words = preview.split()
+        line = ""
+        for w in words:
+            if len(line) + len(w) + 1 > 60:
+                lines.append(line)
+                line = w
+            else:
+                line = f"{line} {w}" if line else w
+        if line:
+            lines.append(line)
+
+        print(f"    [{at}] reason={reason}")
+        for i, l in enumerate(lines):
+            print(f"      {'>' if i == 0 else ' '} {l}")
+    print()
+
+
 def print_feedback(feedback_items):
     """Print all feedback records."""
     print(f"\n{'='*70}")
@@ -205,6 +243,7 @@ def main():
         name = user.get("name", "") or ""
         messages, _ = get_conversation(table, uid)
         projects = get_projects(table, uid)
+        blocked = get_blocked(table, uid)
 
         print_conversation(messages, uid, name)
 
@@ -215,6 +254,8 @@ def main():
                 if p.get("description"):
                     print(f"      {p['description'][:80]}")
             print()
+
+        print_blocked(blocked, uid)
         return
 
     # Default: show all conversations

@@ -28,8 +28,9 @@ users never see it. Plain language only.
 | **Phase 5** | ✅ Done | Production observability — agent/classifier/scheduler telemetry, response validation, analysis tooling |
 | **v1.1** | ✅ Done | Coaching tone overhaul — system prompt, onboarding, context builder, scheduler messages, conversation reset removed |
 | **v2.0** | ✅ Done | Prompt & flow revision — timezone inference, consent→onboarding handoff, session-aware context, on-demand goal decomposition, tiered SMS length rules |
+| **v2.1** | ✅ Done | Onboarding overhaul — adaptive flow (no rigid sequence), graceful too-long handling, multi-goal support, vague goal probing, habit detection, conversations viewer shows blocked messages |
 
-**Current state:** Deployed. Two Lambdas live: `stride-sms` (POST /sms) and `stride-scheduler` (EventBridge every 15 min). A2P 10DLC approved. Observability instrumented. Prompt v2.0 shipped. Ready for beta.
+**Current state:** Deployed. Two Lambdas live: `stride-sms` (POST /sms) and `stride-scheduler` (EventBridge every 15 min). A2P 10DLC approved. Observability instrumented. Prompt v2.1 shipped. Beta users onboarding.
 
 ---
 
@@ -125,7 +126,7 @@ users never see it. Plain language only.
 - `update_preferred_tone(user_id, tone)` — updates `PATTERN#AGGREGATE.preferred_tone`
 
 ### `guards.py` ✅
-- `check_message(message)` — `None` (pass), `"empty"`, or `"too_long"` (>500 chars)
+- `check_message(message)` — `None` (pass), `"empty"`, or `"too_long"` (>1600 chars)
 - `check_rate_limit(user_id, limit=50)` — `True` if over daily limit
 
 ### `prompt.py` ✅
@@ -157,7 +158,7 @@ Logs `validation_warning` events for production analysis. Never blocks — warni
 Full guard chain:
 1. Twilio signature validation → 403 if invalid
 2. Parse `From` (user_id) + `Body`
-3. `check_message()` → block if empty or >500 chars
+3. `check_message()` → block if empty or >1600 chars (specific reply for too-long messages)
 4. `check_rate_limit()` → block if >50 msgs/day
 5. STOP keyword → revoke all consent (SMS + proactive), unsubscribe reply
 6. Consent check → no consent: send opt-in prompt; YES reply: record consent + welcome
@@ -275,7 +276,7 @@ make deploy                        # build stride-sms image + push to ECR + terr
 make push                          # build + push only (no infra change)
 make deploy-site                   # deploy website to S3
 make up                            # local dev with LocalStack
-make test                          # run 219 tests
+make test                          # run 233 tests
 
 # Analytics (queries CloudWatch Logs Insights)
 make analyze                       # last 24h — agent, cost, quality, classifier, scheduler
@@ -320,5 +321,13 @@ make analyze-week                  # last 7 days
 - [x] Session-aware context — agent knows when user replies to proactive message (2026-04-02)
 - [x] On-demand goal decomposition — users can break down goals anytime (2026-04-02)
 - [x] Friday review prompt — actionable, sets expectations (2026-04-02)
-- [x] 219 tests passing
+- [x] Adaptive onboarding — no rigid sequence, rolls with user input (2026-04-02)
+- [x] Graceful too-long handling — specific reply instead of generic block (2026-04-02)
+- [x] Inbound message limit raised from 500 to 1600 chars (2026-04-02)
+- [x] Multi-goal onboarding — acknowledges all, processes one at a time (2026-04-02)
+- [x] Vague goal probing — asks for concrete outcome instead of accepting (2026-04-02)
+- [x] Habit detection during onboarding — routes to create_habit (2026-04-02)
+- [x] Conversations viewer shows blocked messages (2026-04-02)
+- [x] Local chat.py uses production prompts — no drift (2026-04-02)
+- [x] 233 tests passing
 - [ ] Beta users onboarded

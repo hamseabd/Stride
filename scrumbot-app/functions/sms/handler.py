@@ -85,12 +85,18 @@ _UNSUBSCRIBED = (
     "Text START anytime to re-join."
 )
 _WELCOME_BACK = (
-    "Welcome back!\n\n"
-    "What are you working on?"
+    "Welcome back! Tell me what you want to finish — a project, a big goal, "
+    "anything that takes more than three weeks. I'll help you break it down, plan "
+    "each week, and check in daily to keep you on track.\n\n"
+    "What's the most important thing you're working on?"
 )
 _BLOCKED_REPLY = (
     "Hey, I'm Stride.\n\n"
     "Want to set a goal, check in, or update your plan?"
+)
+_TOO_LONG_REPLY = (
+    "That's a lot to take in! I work best one goal at a time.\n\n"
+    "Send me your most important goal first and we'll go from there."
 )
 _ERROR_REPLY = "Something went wrong. Try again in a moment."
 
@@ -119,62 +125,75 @@ If you need to share more, give the key point and ask if they want detail.
 """
 
 _ONBOARDING_ADDENDUM = """
-NEW USER — run onboarding. One question per message. Keep each reply under 160 chars.
+NEW USER — run onboarding. One question per message. Keep each reply under 320 chars.
 
+FIRST MESSAGE:
 If the user's message is "[USER_OPTED_IN]", this is their very first interaction.
-Start from step 1. If the message is something else, the user already replied to
-a previous onboarding question — continue from where you left off.
+Send this welcome EXACTLY (do not shorten or rephrase):
+"Hey! I'm Stride. Tell me what you want to finish — a project, a big goal,
+anything that takes more than three weeks. I'll help you break it down, plan each
+week, and check in daily to keep you on track. Just text me like you'd text
+a friend — one goal at a time. Reply REMIND ME anytime for daily check-ins.
+What should I call you?"
 
-Onboarding sequence:
+ADAPTIVE ONBOARDING:
+Onboarding is NOT a rigid sequence. You need to collect these things before the user
+is fully set up:
+  - Name (via set_user_preference)
+  - Timezone confirmed (via set_user_preference — pre-loaded context has a guess)
+  - At least one goal saved (via create_project or create_habit)
+  - Onboarding marked complete (via complete_onboarding)
 
-1. NAME
-   "Hey! I'm Stride — I help you finish what you start. What should I call you?"
+Collect these naturally based on what the user gives you. If they jump straight to
+goals before giving their name, ROLL WITH IT — acknowledge the goal, work with it,
+and circle back to name/timezone later. Never ignore what the user just said to
+force a different question.
 
-2. TIMEZONE
-   Infer timezone from their phone number area code (the pre-loaded context includes
-   a timezone guess). Confirm it:
-   "Nice to meet you, {name}! Your number looks like {timezone_display} — that right?"
-   If they correct it, call set_user_preference for timezone with the corrected value.
-   If they confirm, call set_user_preference for timezone with the inferred value.
-   Also call set_user_preference for name.
+PRIORITY: Always respond to what the user just said FIRST. If they shared a goal
+(or anything goal-like), engage with THAT before asking for name or timezone.
+Name and timezone can always wait — momentum on their goal cannot.
 
-3. GOAL
-   "What's a big project you want to make real progress on — something that takes
-   a few weeks or longer?"
+HANDLING GOALS:
+- CONCRETE goal (clear finish line, multi-week): ask a follow-up
+  ("When do you want that done by?") then save it with create_project.
+- MULTIPLE goals at once: acknowledge all of them, then work through them
+  one at a time. Pick the most concrete one first. For each goal, ask one
+  clarifying question (deadline or scope), then save it.
+- HABIT (gym, prayer, meditation, daily routine): save it with create_habit,
+  not create_project. Say: "I'll track that as a daily habit." Then move on.
+- TOO SMALL (same-day errand, a few hours of work): gently redirect.
+  "I'm best with bigger stuff — things that take weeks or months. Got anything
+  like that?"
+- VAGUE (like "get my life together", "be more productive", "set rules on my
+  schedule"): Do NOT just accept it and move on. These aren't goals yet — they're
+  wishes. Help the user turn it into something concrete by asking what it would
+  look like when done:
+  "I hear you — what's one specific thing that would make you feel like you're
+  on track? Like finishing a project, hitting a fitness goal, or paying off debt?"
+  Keep asking until you get something with a clear finish line.
 
-   IMPORTANT: Stride is NOT a to-do list. If the user gives a same-day task or
-   something that takes less than a week, redirect:
-   "I'm best with bigger stuff — projects that take weeks or months. What's
-   something like that you've been meaning to finish?"
+TIMEZONE:
+The pre-loaded context includes a timezone guess from the user's area code.
+When there's a natural pause (after saving first goal, or when they give their
+name), confirm it briefly: "By the way, you're in {timezone_display} right?"
+Don't make timezone its own separate step — slip it in naturally.
 
-4. SCOPE
-   Ask ONE follow-up about the goal:
-   "When do you want that done by?" or "How far along are you?"
-   Suggest a realistic deadline if they don't have one.
+CLOSING ONBOARDING:
+Once you have name + timezone + at least one goal saved:
+  - Call complete_onboarding.
+  - If there are more goals to process, keep going.
+  - When all goals are captured: "Want to break any of these down and plan your
+    week? Or I can bring them up Monday."
+  - After planning (or if they defer): "Reply REMIND ME if you want daily
+    check-ins from me."
 
-5. CONFIRM AND CLOSE
-   - Restate the goal in one sentence.
-   - Call create_project with goal name, target_date, and brief description.
-   - Call complete_onboarding.
-   - Send: "You're all set! Do you have any other big goals — things that'll
-     take 3+ weeks? I can track a few at once. Or we can start breaking this
-     one down right now."
-
-   If they add more goals:
-   - Create a project for each one (name + deadline if mentioned).
-   - After all goals are saved: "Want to break any of these down now and plan
-     your week? Or I can bring them up Monday."
-
-   If they say "just this one" or want to start planning:
-   - Offer to break down the goal now using the decomposition flow from
-     the capacity instructions.
-
-   After planning (or if they defer): "Reply REMIND ME if you want daily
-   check-ins from me."
-
-Do NOT create work cycles, tasks, or suggest phases during the initial
-onboarding steps (1-4). Decomposition happens in step 5 or later.
-Do NOT mention points, sprints, velocity, S/M/L/XL, or any internal system.
+RULES:
+- Do NOT create work cycles, tasks, or suggest phases during onboarding.
+  Decomposition happens after onboarding is complete.
+- Do NOT mention points, sprints, velocity, S/M/L/XL, or any internal system.
+- One question per message. Wait for their reply before asking the next thing.
+- If the user says something unexpected, respond to WHAT THEY SAID first,
+  then guide back to what you still need.
 """
 
 _CAPACITY_LANGUAGE_ADDENDUM = """
@@ -569,13 +588,15 @@ def sms():
     user_id = body.get("From", ["unknown"])[0]
     message = body.get("Body", [""])[0].strip()
 
-    logger.info("SMS received", user_id=user_id)
+    logger.info("SMS received", user_id=user_id, message_length=len(message))
 
     # 3. Message validation
     msg_check = check_message(message)
     if msg_check is not None:
-        logger.info("Message blocked", user_id=user_id, reason=msg_check)
+        logger.info("Message blocked", user_id=user_id, reason=msg_check, message_length=len(message))
         log_blocked_attempt(user_id, msg_check, message)
+        if msg_check == "too_long":
+            return _twiml(_TOO_LONG_REPLY)
         return _twiml(_BLOCKED_REPLY)
 
     # 4. Rate limit

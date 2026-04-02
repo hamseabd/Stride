@@ -288,7 +288,7 @@ result = agent(message)
 Inbound SMS
 ├── 1. Twilio signature validation    → 403 if invalid
 ├── 2. Parse From (user_id) + Body
-├── 3. check_message()                → block if empty or >500 chars
+├── 3. check_message()                → block if empty or >1600 chars
 ├── 4. check_rate_limit()             → block if >50 msgs/day
 ├── 5. STOP keyword                   → revoke all consent, unsubscribe reply
 ├── 6. get_consent()

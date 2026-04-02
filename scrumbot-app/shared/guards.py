@@ -2,7 +2,7 @@ from aws_lambda_powertools import Logger
 
 logger = Logger()
 
-MAX_MESSAGE_LENGTH = 500
+MAX_MESSAGE_LENGTH = 1600
 
 
 def check_message(message: str) -> str | None:

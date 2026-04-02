@@ -3,7 +3,10 @@
 from datetime import datetime, timezone as _tz
 from unittest.mock import patch
 
-from functions.sms.handler import _build_user_context, _STATIC_PREFIX
+from functions.sms.handler import (
+    _build_user_context, _STATIC_PREFIX,
+    _ONBOARDING_ADDENDUM, _TOO_LONG_REPLY, _BLOCKED_REPLY, _WELCOME_BACK,
+)
 
 
 class TestBuildUserContext:
@@ -90,7 +93,7 @@ class TestBuildUserContext:
         ctx = _build_user_context("+15551234567", self._user(), is_new_user=True)
 
         assert "ONBOARDING" in ctx.upper() or "NEW USER" in ctx.upper()
-        assert "finish what you start" in ctx
+        assert "what you want to finish" in ctx.lower() or "new user" in ctx.lower()
 
     @patch("functions.sms.handler.get_user_patterns")
     @patch("functions.sms.handler.list_habits")
@@ -257,6 +260,70 @@ class TestSessionAwareContext:
         ctx = _build_user_context("+15551234567", self._user(), is_new_user=False,
                                   latest_outbound=outbound)
         assert "replying to" not in ctx
+
+
+class TestTooLongReply:
+    """Too-long messages get a specific helpful reply, not a generic block."""
+
+    def test_too_long_reply_mentions_one_goal(self):
+        assert "one goal" in _TOO_LONG_REPLY.lower()
+
+    def test_too_long_differs_from_blocked(self):
+        assert _TOO_LONG_REPLY != _BLOCKED_REPLY
+
+    def test_too_long_under_sms_limit(self):
+        assert len(_TOO_LONG_REPLY) <= 480
+
+
+class TestOnboardingAddendum:
+    """Onboarding prompt is adaptive, not rigid."""
+
+    def test_adaptive_not_sequential(self):
+        """Should mention adaptive flow, not rigid numbered steps."""
+        assert "ADAPTIVE" in _ONBOARDING_ADDENDUM.upper()
+        assert "ROLL WITH IT" in _ONBOARDING_ADDENDUM.upper()
+
+    def test_handles_multiple_goals(self):
+        assert "MULTIPLE" in _ONBOARDING_ADDENDUM.upper()
+
+    def test_handles_vague_goals(self):
+        assert "VAGUE" in _ONBOARDING_ADDENDUM.upper()
+
+    def test_handles_habits(self):
+        assert "create_habit" in _ONBOARDING_ADDENDUM
+
+    def test_prioritizes_user_input(self):
+        """Should tell agent to respond to what user said first."""
+        assert "PRIORITY" in _ONBOARDING_ADDENDUM.upper()
+        assert "momentum" in _ONBOARDING_ADDENDUM.lower()
+
+    def test_welcome_message_explains_stride(self):
+        """First message should explain what Stride does."""
+        assert "break it down" in _ONBOARDING_ADDENDUM
+        # "plan each\nweek" wraps across lines in the welcome message
+        assert "plan each" in _ONBOARDING_ADDENDUM
+        assert "check in daily" in _ONBOARDING_ADDENDUM
+
+    def test_no_scrum_jargon_in_user_facing_text(self):
+        """User-facing messages should not contain Scrum jargon.
+        The RULES section mentions 'sprints' to tell the agent not to use it —
+        that's internal instruction, not user-facing."""
+        # Check the welcome message specifically (the part users see)
+        welcome_start = _ONBOARDING_ADDENDUM.index('"Hey!')
+        welcome_end = _ONBOARDING_ADDENDUM.index('What should I call you?"') + len('What should I call you?"')
+        welcome = _ONBOARDING_ADDENDUM[welcome_start:welcome_end].lower()
+        for term in ["sprint", "story point", "standup", "fibonacci", "velocity"]:
+            assert term not in welcome, f"Jargon '{term}' found in welcome message"
+
+
+class TestWelcomeBack:
+    """Re-subscribe message explains what Stride does."""
+
+    def test_explains_stride(self):
+        assert "break it down" in _WELCOME_BACK or "break them down" in _WELCOME_BACK
+
+    def test_under_sms_limit(self):
+        assert len(_WELCOME_BACK) <= 480
 
 
 class TestStaticPrefix:
