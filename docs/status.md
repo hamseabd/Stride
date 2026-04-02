@@ -1,5 +1,5 @@
 # Stride — Project Status
-Last updated: 2026-03-25
+Last updated: 2026-04-02
 
 ---
 
@@ -27,8 +27,9 @@ users never see it. Plain language only.
 | **Sprint 3 Phase 4** | ✅ Done | Deploy + smoke test, all Lambdas live |
 | **Phase 5** | ✅ Done | Production observability — agent/classifier/scheduler telemetry, response validation, analysis tooling |
 | **v1.1** | ✅ Done | Coaching tone overhaul — system prompt, onboarding, context builder, scheduler messages, conversation reset removed |
+| **v2.0** | ✅ Done | Prompt & flow revision — timezone inference, consent→onboarding handoff, session-aware context, on-demand goal decomposition, tiered SMS length rules |
 
-**Current state:** Deployed. Two Lambdas live: `stride-sms` (POST /sms) and `stride-scheduler` (EventBridge every 15 min). A2P 10DLC approved. Observability instrumented. v1.1 coaching tone shipped. Ready for beta.
+**Current state:** Deployed. Two Lambdas live: `stride-sms` (POST /sms) and `stride-scheduler` (EventBridge every 15 min). A2P 10DLC approved. Observability instrumented. Prompt v2.0 shipped. Ready for beta.
 
 ---
 
@@ -128,7 +129,10 @@ users never see it. Plain language only.
 - `check_rate_limit(user_id, limit=50)` — `True` if over daily limit
 
 ### `prompt.py` ✅
-Single-source `STRIDE_SYSTEM_PROMPT`. Covers all 5 session types, estimate rules, plain language rules. Injects `preferred_tone` per user. Includes `PROMPT_VERSION` constant for correlating quality changes with prompt edits.
+Single-source `STRIDE_SYSTEM_PROMPT` (v2.0). Covers all session types, estimate rules, plain language rules. Injects `preferred_tone` per user. Includes `PROMPT_VERSION` constant for correlating quality changes with prompt edits.
+
+### `timezone.py` ✅
+Area code → IANA timezone inference for onboarding. `infer_timezone_from_phone(phone) -> str`. ~80 US area codes mapped to 7 timezones. Best-guess, not authoritative — agent confirms with user during onboarding.
 
 ### `classifier.py` ✅
 Intent classification using Claude Haiku (`claude-haiku-4-5-20251001`). Classifies inbound SMS into: `feedback`, `remind_me`, `no_reminders`, `help`, `conversation`. Uses raw Anthropic SDK (not Strands) for cost — ~$0.001/call. Logs `classifier_metrics` (latency, tokens, intent) for production analysis.
@@ -271,7 +275,7 @@ make deploy                        # build stride-sms image + push to ECR + terr
 make push                          # build + push only (no infra change)
 make deploy-site                   # deploy website to S3
 make up                            # local dev with LocalStack
-make test                          # run 191 tests
+make test                          # run 219 tests
 
 # Analytics (queries CloudWatch Logs Insights)
 make analyze                       # last 24h — agent, cost, quality, classifier, scheduler
@@ -310,5 +314,11 @@ make analyze-week                  # last 7 days
 - [x] Response validation — jargon, length, empty checks before send (2026-03-25)
 - [x] Prompt versioning — `PROMPT_VERSION` constant for correlation (2026-03-25)
 - [x] Analytics script — `make analyze` queries CloudWatch Logs Insights (2026-03-25)
-- [x] 191 tests passing
+- [x] Prompt v2.0 — revised system prompt, onboarding, SMS, capacity addenda (2026-04-02)
+- [x] Timezone inference — area code lookup, agent confirms during onboarding (2026-04-02)
+- [x] Consent→onboarding handoff — agent owns first message, no double intro (2026-04-02)
+- [x] Session-aware context — agent knows when user replies to proactive message (2026-04-02)
+- [x] On-demand goal decomposition — users can break down goals anytime (2026-04-02)
+- [x] Friday review prompt — actionable, sets expectations (2026-04-02)
+- [x] 219 tests passing
 - [ ] Beta users onboarded

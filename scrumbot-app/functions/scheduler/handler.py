@@ -256,7 +256,7 @@ def _build_review_prompt(user_id: str) -> str:
 
     return (
         f"Week's done \u2014 you finished {done_count} of {total_count} tasks. "
-        "How do you feel about this week?"
+        "Want to do a quick review? Takes about 2 minutes."
     )
 
 

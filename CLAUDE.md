@@ -95,13 +95,15 @@ framework runs entirely under the hood; users never see it.
 | Phase 4 — Deploy + smoke test | ✅ Done |
 | Phase 5 — Production observability (telemetry, validation, analysis) | ✅ Done |
 | v1.1 — Coaching tone overhaul (prompt, onboarding, context, scheduler) | ✅ Done |
+| v2.0 — Prompt & flow revision (onboarding, timezone, session context, decomposition) | ✅ Done |
 
 - Two Lambdas live: `stride-sms` (POST /sms) and `stride-scheduler` (EventBridge every 15 min).
-- 19 tools, 188 tests pass against LocalStack.
+- 19 tools, 219 tests pass against LocalStack.
 - Twilio A2P 10DLC: approved (2026-03-23).
 - Legal pages (privacy policy, ToS) published on S3.
 - Agent telemetry: tokens, latency, cost, cache hits logged per call.
 - Response validation: jargon, length, empty checks before every send.
+- Prompt v2.0: timezone inference, session-aware context, on-demand goal decomposition.
 - **Next action: invite beta users** — system is ready.
 
 See `docs/status.md` for detailed infrastructure state and `roadmap.md` for product evolution.
@@ -113,7 +115,7 @@ See `docs/status.md` for detailed infrastructure state and `roadmap.md` for prod
 - `scrumbot-app/`: Python only, no Terraform
   - `/functions/sms/` — stride-sms Lambda handler
   - `/functions/scheduler/` — stride-scheduler Lambda handler (EventBridge, proactive SMS)
-  - `/shared/` — `tools.py`, `db.py`, `models.py`, `prompt.py`, `guards.py`, `classifier.py`, `sms.py`, `validators.py`
+  - `/shared/` — `tools.py`, `db.py`, `models.py`, `prompt.py`, `guards.py`, `classifier.py`, `sms.py`, `validators.py`, `timezone.py`
 - `scripts/` — deployment and analysis scripts (`build_and_push.sh`, `deploy_site.sh`, `analyze.py`)
 - `docs/` — `status.md`, legal docs
 - All Strands tools defined in `shared/tools.py`, never inline

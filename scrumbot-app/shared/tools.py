@@ -12,7 +12,7 @@ logger = Logger()
 
 VALID_ESTIMATES = {"S": 2, "M": 5, "L": 8, "XL": 13}
 VALID_STATUSES = {"todo", "in_progress", "done", "blocked"}
-VALID_PREFERENCES = {"timezone", "checkin_time", "evening_time", "planning_day"}
+VALID_PREFERENCES = {"timezone", "checkin_time", "evening_time", "planning_day", "name"}
 
 
 # ---------------------------------------------------------------------------
@@ -849,8 +849,9 @@ def set_user_preference(user_id: str, preference: str, value: str) -> dict:
 
     Params:
       user_id: The user whose preference to update.
-      preference: Must be one of: timezone, checkin_time, evening_time, planning_day.
+      preference: Must be one of: name, timezone, checkin_time, evening_time, planning_day.
       value: The new value. Format depends on preference:
+        - name: The user's preferred name (e.g. "John")
         - timezone: IANA timezone string (e.g. "America/Los_Angeles")
         - checkin_time: HH:MM in 24h format (e.g. "09:00")
         - evening_time: HH:MM in 24h format (e.g. "18:00")

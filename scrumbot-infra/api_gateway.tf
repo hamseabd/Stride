@@ -13,7 +13,7 @@ module "api_gateway" {
       integration = {
         uri                    = module.lambda_sms.lambda_function_arn
         payload_format_version = "2.0"
-        timeout_milliseconds   = 15000
+        timeout_milliseconds   = 30000
       }
     }
   }

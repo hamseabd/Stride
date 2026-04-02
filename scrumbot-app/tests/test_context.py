@@ -1,5 +1,6 @@
 """Tests for P0: user context pre-loading."""
 
+from datetime import datetime, timezone as _tz
 from unittest.mock import patch
 
 from functions.sms.handler import _build_user_context, _STATIC_PREFIX
@@ -89,7 +90,39 @@ class TestBuildUserContext:
         ctx = _build_user_context("+15551234567", self._user(), is_new_user=True)
 
         assert "ONBOARDING" in ctx.upper() or "NEW USER" in ctx.upper()
-        assert "What should I call you" in ctx
+        assert "finish what you start" in ctx
+
+    @patch("functions.sms.handler.get_user_patterns")
+    @patch("functions.sms.handler.list_habits")
+    @patch("functions.sms.handler.list_active_projects")
+    def test_new_user_includes_inferred_timezone(self, mock_projects, mock_habits, mock_patterns):
+        """New users should see inferred timezone from their area code."""
+        mock_projects.return_value = {"projects": []}
+        mock_habits.return_value = {"habits": []}
+        mock_patterns.return_value = {"found": False}
+
+        # +1404 = Atlanta = Eastern
+        ctx = _build_user_context("+14045551234", self._user(), is_new_user=True)
+        assert "Inferred timezone" in ctx
+        assert "America/New_York" in ctx
+        assert "Eastern time" in ctx
+
+        # +1312 = Chicago = Central
+        ctx = _build_user_context("+13125551234", self._user(), is_new_user=True)
+        assert "America/Chicago" in ctx
+        assert "Central time" in ctx
+
+    @patch("functions.sms.handler.get_user_patterns")
+    @patch("functions.sms.handler.list_habits")
+    @patch("functions.sms.handler.list_active_projects")
+    def test_existing_user_no_inferred_timezone(self, mock_projects, mock_habits, mock_patterns):
+        """Existing users should NOT see inferred timezone."""
+        mock_projects.return_value = {"projects": []}
+        mock_habits.return_value = {"habits": []}
+        mock_patterns.return_value = {"found": False}
+
+        ctx = _build_user_context("+14045551234", self._user(), is_new_user=False)
+        assert "Inferred timezone" not in ctx
 
     @patch("functions.sms.handler.get_user_patterns")
     @patch("functions.sms.handler.list_habits")
@@ -145,6 +178,85 @@ class TestBuildUserContext:
         assert "Portfolio" in ctx
         assert "Backlog" in ctx
         assert "YouTube Channel" in ctx
+
+
+class TestSessionAwareContext:
+    def _user(self):
+        return {"timezone": "America/New_York", "preferred_tone": "balanced", "name": "Test"}
+
+    @patch("functions.sms.handler.get_user_patterns")
+    @patch("functions.sms.handler.list_habits")
+    @patch("functions.sms.handler.list_active_projects")
+    def test_recent_outbound_injects_session(self, mock_projects, mock_habits, mock_patterns):
+        mock_projects.return_value = {"projects": []}
+        mock_habits.return_value = {"habits": []}
+        mock_patterns.return_value = {"found": False}
+
+        now = datetime.now(_tz.utc).isoformat().replace("+00:00", "Z")
+        outbound = {"message_type": "morning_reminder", "sent_at": now}
+
+        ctx = _build_user_context("+15551234567", self._user(), is_new_user=False,
+                                  latest_outbound=outbound)
+        assert "replying to a morning check-in message" in ctx
+
+    @patch("functions.sms.handler.get_user_patterns")
+    @patch("functions.sms.handler.list_habits")
+    @patch("functions.sms.handler.list_active_projects")
+    def test_stale_outbound_not_injected(self, mock_projects, mock_habits, mock_patterns):
+        """Outbound older than 6 hours should NOT inject session context."""
+        mock_projects.return_value = {"projects": []}
+        mock_habits.return_value = {"habits": []}
+        mock_patterns.return_value = {"found": False}
+
+        from datetime import timedelta
+        old = (datetime.now(_tz.utc) - timedelta(hours=8)).isoformat().replace("+00:00", "Z")
+        outbound = {"message_type": "morning_reminder", "sent_at": old}
+
+        ctx = _build_user_context("+15551234567", self._user(), is_new_user=False,
+                                  latest_outbound=outbound)
+        assert "replying to" not in ctx
+
+    @patch("functions.sms.handler.get_user_patterns")
+    @patch("functions.sms.handler.list_habits")
+    @patch("functions.sms.handler.list_active_projects")
+    def test_no_outbound_no_session(self, mock_projects, mock_habits, mock_patterns):
+        mock_projects.return_value = {"projects": []}
+        mock_habits.return_value = {"habits": []}
+        mock_patterns.return_value = {"found": False}
+
+        ctx = _build_user_context("+15551234567", self._user(), is_new_user=False,
+                                  latest_outbound=None)
+        assert "replying to" not in ctx
+
+    @patch("functions.sms.handler.get_user_patterns")
+    @patch("functions.sms.handler.list_habits")
+    @patch("functions.sms.handler.list_active_projects")
+    def test_friday_review_session(self, mock_projects, mock_habits, mock_patterns):
+        mock_projects.return_value = {"projects": []}
+        mock_habits.return_value = {"habits": []}
+        mock_patterns.return_value = {"found": False}
+
+        now = datetime.now(_tz.utc).isoformat().replace("+00:00", "Z")
+        outbound = {"message_type": "friday_review", "sent_at": now}
+
+        ctx = _build_user_context("+15551234567", self._user(), is_new_user=False,
+                                  latest_outbound=outbound)
+        assert "replying to a Friday review message" in ctx
+
+    @patch("functions.sms.handler.get_user_patterns")
+    @patch("functions.sms.handler.list_habits")
+    @patch("functions.sms.handler.list_active_projects")
+    def test_outbound_without_message_type_ignored(self, mock_projects, mock_habits, mock_patterns):
+        mock_projects.return_value = {"projects": []}
+        mock_habits.return_value = {"habits": []}
+        mock_patterns.return_value = {"found": False}
+
+        now = datetime.now(_tz.utc).isoformat().replace("+00:00", "Z")
+        outbound = {"sent_at": now}  # no message_type
+
+        ctx = _build_user_context("+15551234567", self._user(), is_new_user=False,
+                                  latest_outbound=outbound)
+        assert "replying to" not in ctx
 
 
 class TestStaticPrefix:

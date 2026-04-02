@@ -24,7 +24,7 @@ module "lambda_sms" {
 
   tracing_mode = "Active"
   memory_size  = 256
-  timeout      = 15
+  timeout      = 30
 
   environment_variables = merge(local.common_env, {
     POWERTOOLS_SERVICE_NAME = "stride-sms"
@@ -32,6 +32,7 @@ module "lambda_sms" {
     TWILIO_AUTH_TOKEN       = var.twilio_auth_token
     TWILIO_ACCOUNT_SID      = var.twilio_account_sid
     TWILIO_PHONE_NUMBER     = var.twilio_phone_number
+    NOTIFY_PHONE            = var.notify_phone
   })
 
   tags = {

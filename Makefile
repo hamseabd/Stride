@@ -1,4 +1,4 @@
-.PHONY: up down build push deploy test chat logs-sms logs-scheduler feedback feedback-user deploy-site analyze analyze-cost analyze-quality analyze-week
+.PHONY: up down build push deploy test chat logs-sms logs-scheduler feedback feedback-user deploy-site analyze analyze-cost analyze-quality analyze-week conversations conversations-user conversations-all
 
 # ── Config ────────────────────────────────────────────────────────────────────
 TABLE ?= stride-prod
@@ -65,6 +65,17 @@ feedback-user:
 	  --expression-attribute-values '{":pk":{"S":"USER#$(USER)"},":f":{"S":"FEEDBACK#"}}' \
 	  --query "Items[*].{body:body.S,source:source.S,at:created_at.S}" \
 	  --output table
+
+# ── Conversations (prompt review) ─────────────────────────────────────────────
+conversations:
+	cd scrumbot-app && PYTHONPATH=. .venv/bin/python ../scripts/conversations.py
+
+conversations-user:
+	@test -n "$(USER)" || (echo "Usage: make conversations-user USER=+16124014226" && exit 1)
+	cd scrumbot-app && PYTHONPATH=. .venv/bin/python ../scripts/conversations.py --user $(USER)
+
+conversations-all:
+	cd scrumbot-app && PYTHONPATH=. .venv/bin/python ../scripts/conversations.py --all-users
 
 # ── Site ──────────────────────────────────────────────────────────────────────
 deploy-site:

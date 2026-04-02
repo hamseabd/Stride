@@ -1,7 +1,7 @@
 import base64
 import os
 import time
-from datetime import date
+from datetime import date, datetime, timezone as _tz
 from urllib.parse import parse_qs
 
 from aws_lambda_powertools import Logger, Tracer
@@ -12,7 +12,29 @@ from twilio.twiml.messaging_response import MessagingResponse
 from strands import Agent
 from strands.models.anthropic import AnthropicModel
 
+from shared.sms import send_sms
 from shared.prompt import STRIDE_SYSTEM_PROMPT, PROMPT_VERSION
+from shared.timezone import infer_timezone_from_phone, TZ_DISPLAY_NAMES
+
+
+class _CachedAnthropicModel(AnthropicModel):
+    """AnthropicModel subclass that tracks cache token metrics.
+
+    Strands v0.1.6 drops cache_creation_input_tokens and cache_read_input_tokens.
+    This override accumulates them on the model instance for telemetry.
+    """
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.cache_read_tokens = 0
+        self.cache_write_tokens = 0
+
+    def format_chunk(self, event):
+        if event.get("type") == "metadata":
+            usage = event.get("usage", {})
+            self.cache_read_tokens += usage.get("cache_read_input_tokens", 0)
+            self.cache_write_tokens += usage.get("cache_creation_input_tokens", 0)
+        return super().format_chunk(event)
 from shared.guards import check_message, check_rate_limit
 from shared.classifier import classify_intent
 from shared.validators import validate_response, MAX_SMS_CHARS
@@ -52,147 +74,189 @@ TOOLS = [
 ]
 
 _OPT_IN_PROMPT = (
-    "Hey! I'm Stride \u2014 I help you finish what you start.\n"
+    "Hey! I'm Stride.\n\n"
+    "I help you finish what you start.\n\n"
     "Reply YES to get started.\n"
-    "Reply STOP anytime to unsubscribe."
+    "Reply STOP anytime to opt out."
 )
-_WELCOME = (
-    "You're in! I'm Stride. "
-    "Tell me one goal you want to make progress on and I'll help you get there."
-)
+_WELCOME = "You're in!"
 _UNSUBSCRIBED = (
-    "You've been unsubscribed from Stride. "
-    "Text us again anytime to re-join."
+    "You've been unsubscribed.\n\n"
+    "Text START anytime to re-join."
+)
+_WELCOME_BACK = (
+    "Welcome back!\n\n"
+    "What are you working on?"
 )
 _BLOCKED_REPLY = (
-    "I'm Stride \u2014 I help with your goals and plans.\n"
+    "Hey, I'm Stride.\n\n"
     "Want to set a goal, check in, or update your plan?"
 )
 _ERROR_REPLY = "Something went wrong. Try again in a moment."
 
 _SMS_SYSTEM_ADDENDUM = """
-You are responding via SMS. Critical rules:
-- ONE QUESTION PER MESSAGE. Never combine two questions in one text.
-  Bad: "What's your goal? And when do you want it done by?"
-  Good: "What's one thing you want to finish or make real progress on?"
-  Then WAIT for their reply before asking the next thing.
-- Keep every reply under 300 characters when possible.
-- Never use markdown, bullet points, numbered lists, or any formatting.
-- Plain sentences only. Short paragraphs are ok.
-- Never expose internal IDs, error messages, or technical details.
-- If you need to share more info, send the most important part and ask if they want detail.
+You are responding via SMS. These rules are non-negotiable.
+
+ONE QUESTION PER MESSAGE. Never combine two questions in one text.
+Bad: "What's your goal? And when do you want it done by?"
+Good: "What's a big project you want to make progress on?"
+Wait for their reply before asking the next thing.
+
+MESSAGE LENGTH:
+Quick replies and single questions: aim for 160 chars (1 text).
+Check-ins and planning questions: up to 320 chars (2 texts).
+Reviews and summaries: up to 480 chars max (3 texts, hard limit).
+Shorter is always better. Never exceed 480 characters.
+
+FORMATTING:
+No markdown, no bold, no headers, no asterisks, no emojis.
+No bullet points or numbered lists.
+For task rundowns, use plain line breaks with one task per line.
+Plain sentences and short paragraphs only.
+
+Never expose internal IDs, error messages, or technical details.
+If you need to share more, give the key point and ask if they want detail.
 """
 
 _ONBOARDING_ADDENDUM = """
-NEW USER — no projects yet. Run setup.
+NEW USER — run onboarding. One question per message. Keep each reply under 160 chars.
 
-CRITICAL: ONE QUESTION PER MESSAGE. Never send two questions in one text.
-SMS users drop off when they get a wall of text. Ask one thing. Wait. Ask the next.
+If the user's message is "[USER_OPTED_IN]", this is their very first interaction.
+Start from step 1. If the message is something else, the user already replied to
+a previous onboarding question — continue from where you left off.
 
 Onboarding sequence:
-1. "Hey! I'm Stride, your productivity coach. What should I call you?"
-2. Wait for name. "Nice to meet you, {name}! What timezone are you in?"
-   (If they say a city, use set_user_preference with the IANA timezone.)
-3. "What's one thing you want to finish or make real progress on?"
-4. Wait for their goal. "When do you want that done by?"
-   (If no deadline, suggest one: "Let's aim for [reasonable timeframe]?")
-5. Now DECOMPOSE the goal:
-   - First ask: "What feels like the first step to you?"
-   - Wait for their answer. Use their instinct as the starting point.
-   - Then propose the full structure: "Smart — [validate their idea]. I'd do
-     something like: 1) [phase based on their input], 2) [phase], 3) [phase].
-     Sound right?"
-   - Call create_project with the goal name, target_date, and a description
-     containing the 2-3 phases.
-6. Wait for confirmation. Then plan THIS WEEK:
-   - "Let's get started. For this week, I think these make sense:"
-   - Create a work cycle (this week's dates, goal = phase 1 description).
-   - Create 2-3 tasks. Tell the user what you're creating and roughly how long
-     each will take (time language, never S/M/L/XL).
-7. "Any daily habits you want to build — like writing, exercise, or reading?"
-   Use create_habit if yes. If they say no, that's fine.
-8. Call complete_onboarding.
-9. "I'll check in tomorrow morning to see how it's going. Reply REMIND ME
-   to get daily check-ins from me."
 
-Keep each reply under 160 chars when possible — 1 SMS segment.
-Never mention 'points', 'sprints', or 'stories'. Never show S/M/L/XL.
+1. NAME
+   "Hey! I'm Stride — I help you finish what you start. What should I call you?"
 
-IMPORTANT: The user's first week plan is created NOW, during onboarding.
-They should leave this conversation with a project, a phase plan, 2-3 tasks
-for the week, and optionally a habit or two. They're ready to go.
+2. TIMEZONE
+   Infer timezone from their phone number area code (the pre-loaded context includes
+   a timezone guess). Confirm it:
+   "Nice to meet you, {name}! Your number looks like {timezone_display} — that right?"
+   If they correct it, call set_user_preference for timezone with the corrected value.
+   If they confirm, call set_user_preference for timezone with the inferred value.
+   Also call set_user_preference for name.
+
+3. GOAL
+   "What's a big project you want to make real progress on — something that takes
+   a few weeks or longer?"
+
+   IMPORTANT: Stride is NOT a to-do list. If the user gives a same-day task or
+   something that takes less than a week, redirect:
+   "I'm best with bigger stuff — projects that take weeks or months. What's
+   something like that you've been meaning to finish?"
+
+4. SCOPE
+   Ask ONE follow-up about the goal:
+   "When do you want that done by?" or "How far along are you?"
+   Suggest a realistic deadline if they don't have one.
+
+5. CONFIRM AND CLOSE
+   - Restate the goal in one sentence.
+   - Call create_project with goal name, target_date, and brief description.
+   - Call complete_onboarding.
+   - Send: "You're all set! Do you have any other big goals — things that'll
+     take 3+ weeks? I can track a few at once. Or we can start breaking this
+     one down right now."
+
+   If they add more goals:
+   - Create a project for each one (name + deadline if mentioned).
+   - After all goals are saved: "Want to break any of these down now and plan
+     your week? Or I can bring them up Monday."
+
+   If they say "just this one" or want to start planning:
+   - Offer to break down the goal now using the decomposition flow from
+     the capacity instructions.
+
+   After planning (or if they defer): "Reply REMIND ME if you want daily
+   check-ins from me."
+
+Do NOT create work cycles, tasks, or suggest phases during the initial
+onboarding steps (1-4). Decomposition happens in step 5 or later.
+Do NOT mention points, sprints, velocity, S/M/L/XL, or any internal system.
 """
 
 _CAPACITY_LANGUAGE_ADDENDUM = """
-CRITICAL — how you talk about workload:
-- NEVER say "S", "M", "L", "XL", "small", "medium", "large", "points", "pts", or "story points".
-- NEVER say "I'll mark that as M" or "That's an L task." The user must not see the sizing system.
-- Always use time language: "a few hours", "a day or two", "most of the week", "more than a week".
-- Talk about capacity in days: "You usually get about 3 good days of work done per week" (not "15 points").
-- When a user is over-planned: "That's about 5 days of work for a 3-day week. What can wait?"
-- The estimate and point system exists internally for tracking. Users must NEVER see any part of it.
+ESTIMATES — INTERNAL ONLY, NEVER SHOW TO USERS:
+When creating tasks, pick an estimate internally: S, M, L, or XL.
+NEVER say "S", "M", "L", "XL", "small", "medium", "large", "points", "pts", or "story points".
+NEVER say "I'll mark that as M" or "That's an L task."
+Always use time language:
+S = "a few hours"
+M = "a day or two"
+L = "most of the week"
+XL = "more than a week" (flag as risky, suggest breaking down)
+Talk about capacity in days: "You usually get about 3 good days of work done per week."
+When over-planned: "That's about 5 days of work for a 3-day week. What can wait?"
+When calling create_task, pass the estimate parameter (S/M/L/XL) but say the time version to the user.
+If a user asks "how long will that take", respond with time language. Never explain the sizing system.
 
-GOAL DECOMPOSITION — how to break down a goal (used during onboarding AND on-demand planning):
-When planning a goal (e.g. "launch my portfolio", "save $5K", "get 10 clients"):
-1. Confirm it: restate it back to make sure you understand.
-2. Ask for a deadline: "When do you want that done by?" If no deadline, suggest one
-   together: "Let's aim for 6 weeks from now?"
-3. Propose 2-3 phases: "I'd break that into: 1) [phase], 2) [phase], 3) [phase]. Sound right?"
-4. Store the phases: call create_project with the phase plan in the description field, e.g.
-   description="Phase 1: Research and pick template (week 1). Phase 2: Write all content (weeks 2-3). Phase 3: Go live and share (week 4)."
-5. Focus on THIS WEEK: "Let's plan this week. For phase 1, I think these make sense:" then
-   propose 2-3 concrete tasks and create them.
-6. Never dump all phases as tasks. One week at a time. Future phases are in the plan, not the task list.
+GOAL DECOMPOSITION — during planning sessions and on-demand, never during initial onboarding.
+When breaking down a goal for the first time:
+1. Confirm you understand — restate it in one sentence.
+2. If no deadline, suggest one together.
+3. Propose 2-3 phases in one message. Keep it brief:
+   "I'd break this into: research and pick a template, then write content,
+   then launch. Sound right?"
+4. Store confirmed phases in the project description.
+5. Plan THIS WEEK only — propose 2-3 concrete tasks for the current phase.
+6. Future phases stay in the plan. Don't create tasks for them.
+Break this across multiple messages. One step, one reply, then the next.
+Never propose phases AND weekly tasks in the same message.
 
 NEW GOALS — capture vs plan:
-When a user mentions a new goal AFTER onboarding:
-- Save it immediately: call create_project with the name (and deadline if they mention one).
-- Then ask: "Want to break this down and plan now, or should I bring it up on your next
-  planning day?"
-- If they want to plan now: run the full decomposition flow above (phases, cycle, tasks).
-- If they want to wait: leave it as a backlog goal. No cycle, no tasks yet.
-- On planning day, surface all backlog goals: "You also have 'YouTube channel' saved —
-  want to start planning that this week?"
+When a user mentions a new goal after onboarding:
+Save it immediately with create_project (name and deadline if mentioned).
+Ask: "Want to break this down now, or should I bring it up on your next planning day?"
+If they want to plan now, run the decomposition flow above.
+If they want to wait, create the project with no cycle, no tasks, no phases.
+Just the name and deadline. It shows up as backlog on planning day.
 
 BACKLOG vs ACTIVE GOALS:
-- A goal WITH an active work cycle = active (being worked on this week).
-- A goal WITHOUT a work cycle = backlog (saved, waiting to be planned).
-- The pre-loaded context labels both clearly. Reference backlog goals on planning day.
-- Never create a work cycle for a backlog goal unless the user explicitly asks to plan it.
+A goal WITH an active work cycle = active (being worked on this week).
+A goal WITHOUT a work cycle = backlog (saved, waiting to be planned).
+The pre-loaded context labels both clearly. Reference backlog goals on planning day.
+Never create a work cycle for a backlog goal unless the user explicitly asks.
 
 MULTIPLE ACTIVE GOALS:
-- Users can have multiple active goals at the same time. Each is a separate project.
-- When planning or checking in, reference all active goals: "You've got two things going —
-  the portfolio and the blog. What's the focus this week?"
-- If a user mentions a new goal mid-conversation, create a new project. Don't merge it into
-  an existing one unless they ask.
+Users can have multiple active goals. Each is a separate project.
+When planning or checking in, reference all active goals.
+If a user mentions a new goal mid-conversation, create a new project.
+Don't merge it into an existing one unless they ask.
 
 PLANNING DAY (Monday or user-configured):
-- Review each active goal: last week's progress, this week's focus.
-- Surface backlog goals: "You also have [X] and [Y] saved. Want to activate one of those?"
-- For each active goal: create a new work cycle with tasks for the week. Reference the phase
-  plan from the project description to pick the right focus.
-- Let the user decide priorities: "Which goals are the main focus this week?"
+Run this as a conversation, not a checklist.
+1. Start with last week's results if available: "Last week you finished X of Y tasks."
+2. For each active goal, ask what the focus is this week. One goal at a time.
+3. After tasks are set for active goals, surface backlog goals that haven't been
+   broken down yet: "You also have [X] saved but haven't planned it out yet.
+   Want to break it down and start this week?"
+   If they say yes, run the goal decomposition flow for that goal.
+   If they say no, leave it in backlog.
+4. If total workload exceeds their usual capacity, flag it:
+   "That's about 5 days of work — you usually get about 3 done. What can wait?"
+Create a new work cycle for each active goal as tasks are confirmed.
+Don't pre-plan everything and dump it — let the user shape the week.
 
-WHEN THE WEEK IS ALREADY PLANNED (user already has tasks):
-- If a user already has tasks for the week and texts you, don't re-plan. Help them with
-  what they have — check in, update status, work through blockers.
+WHEN THE WEEK IS ALREADY PLANNED:
+If a user already has tasks for the week and texts you, don't re-plan. Help them
+with what they have — check in, update status, work through blockers.
 
-HABITS — separate from goals:
-- Habits are recurring practices: "Write 30 min daily", "Exercise 3x/week", "Read before bed".
-- Use create_habit for these, NOT create_task.
-- Habits have streaks. Celebrate milestones: "5 days in a row writing — nice!"
-- In morning check-ins, mention both tasks and habits.
-- In Friday reviews, include habit streaks: "You wrote 5 of 7 days this week."
-- If a streak breaks, be encouraging: "Missed yesterday — want to get back on it today?"
+HABITS — separate from goals. Use create_habit, not create_task.
+Mention habits alongside tasks in morning check-ins.
+Include habit streaks in Friday reviews.
+Celebrate milestones. If a streak breaks, be encouraging — don't guilt.
 
-FRIDAY REVIEWS — what to include:
-- Tasks: X of Y done, name the ones that got done and the ones that didn't.
-- Goal progress: reference the phase plan. "You're in Phase 1 of the portfolio.
-  You've been at it for 2 weeks with 35 days until the deadline."
-- Habits: streak summary for each habit.
-- One pattern: something you notice (overcommitting, avoiding certain tasks, blockers recurring).
-- One suggestion: something concrete to try next week.
+FRIDAY REVIEWS — run as a conversation, not a report.
+Start with the numbers: tasks done vs planned, name specific tasks.
+Wait for their response.
+Then share one observation — a pattern, a win, or something you noticed.
+Wait for their response.
+End with one concrete suggestion for next week.
+Include habit streaks naturally. Don't dump everything at once.
+If the user only has 1-2 weeks of data, keep the review light.
+You don't have enough data for real patterns yet — say so honestly.
 """
 
 
@@ -221,9 +285,17 @@ def _validate_twilio(event: dict) -> bool:
     )
     params = {
         k: v[0] if isinstance(v, list) else v
-        for k, v in parse_qs(_get_body(event)).items()
+        for k, v in parse_qs(_get_body(event), keep_blank_values=True).items()
     }
-    return validator.validate(url, params, signature)
+    valid = validator.validate(url, params, signature)
+    if not valid:
+        logger.warning(
+            "Twilio signature mismatch",
+            has_signature=bool(signature),
+            reconstructed_url=url,
+            from_number=params.get("From", "missing"),
+        )
+    return valid
 
 
 def _twiml(text: str) -> dict:
@@ -261,7 +333,8 @@ _STATIC_PREFIX = (
 )
 
 
-def _build_user_context(user_id: str, user: dict, is_new_user: bool) -> str:
+def _build_user_context(user_id: str, user: dict, is_new_user: bool,
+                        latest_outbound: dict | None = None) -> str:
     """
     Pre-load all user context into a string for the system prompt.
     Constraint #20: the agent never fetches its own context.
@@ -277,6 +350,12 @@ def _build_user_context(user_id: str, user: dict, is_new_user: bool) -> str:
     ]
     if name:
         lines.append(f"User's name: {name}")
+
+    # Timezone inference for new users — agent confirms rather than asks
+    if is_new_user:
+        inferred_tz = infer_timezone_from_phone(user_id)
+        display = TZ_DISPLAY_NAMES.get(inferred_tz, "Eastern time")
+        lines.append(f"Inferred timezone from area code: {inferred_tz} ({display})")
 
     # --- Pre-load projects + tasks (split active vs backlog) ---
     projects = list_active_projects(user_id=user_id)
@@ -368,6 +447,28 @@ def _build_user_context(user_id: str, user: dict, is_new_user: bool) -> str:
     lines.append("\nThis context is pre-loaded and current. Do NOT call list_active_projects, get_cycle_data,")
     lines.append("get_user_patterns, get_pace_history, or list_habits to re-fetch it. Only call write tools (create_task, etc).")
 
+    # --- Session-aware context (proactive message reply detection) ---
+    if latest_outbound and latest_outbound.get("message_type"):
+        # Only inject if the outbound was recent (within 6 hours)
+        try:
+            sent_str = latest_outbound.get("sent_at", "")
+            if sent_str:
+                sent_at = datetime.fromisoformat(sent_str.rstrip("Z")).replace(tzinfo=_tz.utc)
+                age_hours = (datetime.now(_tz.utc) - sent_at).total_seconds() / 3600
+                if age_hours <= 6:
+                    msg_type = latest_outbound["message_type"]
+                    type_map = {
+                        "morning_reminder": "a morning check-in message",
+                        "evening_checkin": "an evening check-in message",
+                        "monday_planning": "a Monday planning message",
+                        "friday_review": "a Friday review message",
+                        "midweek_adjust": "a midweek adjustment message",
+                    }
+                    desc = type_map.get(msg_type, "a proactive message")
+                    lines.append(f"\nThe user is replying to {desc}. Respond accordingly.")
+        except Exception:
+            pass  # Don't let session detection break context building
+
     # --- Onboarding addendum ---
     if is_new_user:
         lines.append(_ONBOARDING_ADDENDUM)
@@ -375,18 +476,19 @@ def _build_user_context(user_id: str, user: dict, is_new_user: bool) -> str:
     return "\n".join(lines)
 
 
-def _call_agent(user_id: str, message: str, is_new_user: bool, user: dict) -> str:
+def _call_agent(user_id: str, message: str, is_new_user: bool, user: dict,
+                latest_outbound: dict | None = None) -> str:
     """Run the Stride agent for an SMS message. Returns the reply string."""
     planning_day = int(user.get("planning_day", 1))
     tz = user.get("timezone", "America/New_York")
 
     # P0: Pre-load all user context (constraint #20)
-    dynamic_suffix = _build_user_context(user_id, user, is_new_user)
+    dynamic_suffix = _build_user_context(user_id, user, is_new_user, latest_outbound)
 
     history = get_conversation(user_id)
 
     # P1: Prompt caching — static prefix is cached (90% cheaper), dynamic suffix is not
-    model = AnthropicModel(model_id="claude-sonnet-4-6", max_tokens=1024)
+    model = _CachedAnthropicModel(model_id="claude-sonnet-4-6", max_tokens=1024)
     model.update_config(params={
         "system": [
             {"type": "text", "text": _STATIC_PREFIX, "cache_control": {"type": "ephemeral"}},
@@ -408,8 +510,8 @@ def _call_agent(user_id: str, message: str, is_new_user: bool, user: dict) -> st
         usage = result.metrics.accumulated_usage
         input_tokens = usage.get("inputTokens", 0)
         output_tokens = usage.get("outputTokens", 0)
-        cache_read = usage.get("cacheReadInputTokens", 0)
-        cache_write = usage.get("cacheWriteInputTokens", 0)
+        cache_read = model.cache_read_tokens
+        cache_write = model.cache_write_tokens
 
         # Cost estimate (claude-sonnet-4-6: $3/$15 per MTok, cache read 10%, cache write 125%)
         cost_usd = (
@@ -455,6 +557,7 @@ def sms():
      11. Stride agent (Sonnet)
     """
     event = app.current_event._data  # raw API GW event
+    _request_start = time.time()
 
     # 1. Twilio signature validation
     if not _validate_twilio(event):
@@ -488,6 +591,9 @@ def sms():
         revoke_consent(user_id)
         revoke_proactive_consent(user_id)
         logger.info("User unsubscribed", user_id=user_id)
+        notify_phone = os.environ.get("NOTIFY_PHONE", "")
+        if notify_phone:
+            send_sms(notify_phone, f"Stride user unsubscribed: {user_id}")
         return _twiml(_UNSUBSCRIBED)
 
     # 6. Consent check
@@ -495,10 +601,38 @@ def sms():
     consent_active = consent is not None and consent.get("status") == "active"
 
     if not consent_active:
-        if msg_upper == "YES":
+        if msg_upper in ("YES", "START"):
+            is_resubscribe = consent is not None
             record_consent(user_id=user_id, phone=user_id)
-            logger.info("New user welcomed", user_id=user_id)
-            return _twiml(_WELCOME)
+            logger.info("User opted in", user_id=user_id, keyword=msg_upper,
+                         resubscribe=is_resubscribe)
+            notify_phone = os.environ.get("NOTIFY_PHONE", "")
+            if notify_phone and user_id != notify_phone:
+                label = "re-subscribed" if is_resubscribe else "signed up"
+                send_sms(notify_phone, f"Stride user {label}: {user_id}")
+
+            if is_resubscribe:
+                return _twiml(_WELCOME_BACK)
+
+            # New user: agent owns the first message via REST, empty TwiML
+            try:
+                user = get_or_create_user(user_id=user_id, phone=user_id)
+                if "error" not in user:
+                    reply = _call_agent(
+                        user_id=user_id,
+                        message="[USER_OPTED_IN]",
+                        is_new_user=True,
+                        user=user,
+                    )
+                    send_sms(user_id, reply)
+                    logger.info("Onboarding agent fired", user_id=user_id)
+                else:
+                    send_sms(user_id, _WELCOME)
+            except Exception:
+                logger.exception("Onboarding agent call failed", user_id=user_id)
+                send_sms(user_id, _WELCOME)
+
+            return Response(status_code=200, content_type="text/xml", body="<Response/>")
         else:
             logger.info("Sending opt-in prompt", user_id=user_id)
             return _twiml(_OPT_IN_PROMPT)
@@ -525,7 +659,8 @@ def sms():
 
     # intent is "help" or "conversation" — route to Sonnet agent
 
-    # 8. Track replied_at on latest outbound (for tone derivation)
+    # 8. Track replied_at on latest outbound (for tone derivation + session context)
+    latest_out = None
     try:
         latest_out = get_latest_outbound(user_id)
         if latest_out and not latest_out.get("replied_at"):
@@ -551,8 +686,15 @@ def sms():
     logger.info("Routing to agent", user_id=user_id, is_new_user=is_new_user)
 
     # 11. Stride agent
+    # Twilio hard-caps webhook responses at 15s. If the agent takes longer,
+    # Twilio drops the TwiML and the user gets silence. To handle this:
+    #   - Lambda timeout is 30s (gives the agent room to finish)
+    #   - If agent finishes in <12s → return TwiML (free, synchronous)
+    #   - If agent finishes in >=12s → Twilio likely timed out, send via REST API
+    TWIML_DEADLINE = 12  # seconds — leave 3s buffer for Twilio's 15s limit
     try:
-        reply = _call_agent(user_id=user_id, message=message, is_new_user=is_new_user, user=user)
+        reply = _call_agent(user_id=user_id, message=message, is_new_user=is_new_user,
+                            user=user, latest_outbound=latest_out)
         warnings = validate_response(reply)
         if warnings.get("empty"):
             reply = _ERROR_REPLY
@@ -563,9 +705,20 @@ def sms():
                 truncated.rfind("? "), truncated.rfind("! "),
             )
             reply = truncated[:last_break + 1] if last_break > 0 else truncated
+
+        elapsed = time.time() - _request_start
+        if elapsed >= TWIML_DEADLINE:
+            # Twilio likely already timed out — send reply via REST API
+            logger.info("Async fallback", user_id=user_id, elapsed_s=round(elapsed, 1))
+            send_sms(user_id, reply)
+            return Response(status_code=200, content_type="text/xml", body="<Response/>")
         return _twiml(reply)
     except Exception:
         logger.exception("SMS agent call failed", user_id=user_id)
+        elapsed = time.time() - _request_start
+        if elapsed >= TWIML_DEADLINE:
+            send_sms(user_id, _ERROR_REPLY)
+            return Response(status_code=200, content_type="text/xml", body="<Response/>")
         return _twiml(_ERROR_REPLY)
 
 

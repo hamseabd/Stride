@@ -493,6 +493,10 @@ def get_conversation(user_id: str) -> list:
                 continue
             alternated.append(msg)
 
+        # Ensure first message is role=user (API requirement)
+        while alternated and alternated[0].get("role") != "user":
+            alternated.pop(0)
+
         return alternated
     except Exception as e:
         logger.error("get_conversation failed — returning empty", error=str(e), user_id=user_id)
@@ -532,8 +536,25 @@ def save_conversation(user_id: str, messages: list, planning_day: int = 1, user_
                 elif isinstance(content, str):
                     stripped.append(msg)
 
+        # Enforce alternation — stripping may drop pure-tool messages,
+        # leaving consecutive same-role messages.
+        merged = []
+        for msg in stripped:
+            if merged and msg.get("role") == merged[-1].get("role"):
+                prev_content = merged[-1].get("content", [])
+                new_content = msg.get("content", [])
+                if isinstance(prev_content, list) and isinstance(new_content, list):
+                    merged[-1]["content"] = prev_content + new_content
+                continue
+            merged.append(msg)
+        stripped = merged
+
         if len(stripped) > 20:
             stripped = stripped[-20:]
+
+        # Ensure first message is role=user (API requirement)
+        while stripped and stripped[0].get("role") != "user":
+            stripped.pop(0)
 
         messages_json = json.dumps(stripped)
         while len(messages_json.encode("utf-8")) > 350_000 and len(stripped) > 2:

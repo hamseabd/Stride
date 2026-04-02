@@ -43,3 +43,9 @@ variable "image_tag" {
   type        = string
   default     = "latest"
 }
+
+variable "notify_phone" {
+  description = "Phone number (E.164) to receive new-user signup notifications. Empty = no notifications."
+  type        = string
+  default     = ""
+}

@@ -63,6 +63,56 @@ class TestCap:
         assert loaded[0]["content"][0]["text"] == "msg 10"
 
 
+class TestAlternation:
+    def test_merges_consecutive_same_role_after_tool_strip(self, ddb, user_id):
+        """When tool_result messages are stripped, consecutive assistant messages
+        should be merged so the 20-turn count is accurate."""
+        messages = [
+            {"role": "user", "content": [{"type": "text", "text": "create project"}]},
+            {"role": "assistant", "content": [
+                {"type": "text", "text": "creating..."},
+                {"type": "toolUse", "toolUseId": "t1", "name": "create_project", "input": {}},
+            ]},
+            {"role": "user", "content": [{"type": "toolResult", "toolUseId": "t1", "content": []}]},
+            {"role": "assistant", "content": [{"type": "text", "text": "done!"}]},
+        ]
+        save_conversation(user_id, messages)
+        loaded = get_conversation(user_id)
+        # Two assistant messages should merge after tool_result is dropped
+        assert len(loaded) == 2
+        assert loaded[0]["role"] == "user"
+        assert loaded[1]["role"] == "assistant"
+
+    def test_first_message_must_be_user(self, ddb, user_id):
+        """If truncation leaves an assistant message first, it should be dropped."""
+        messages = [
+            {"role": "assistant", "content": [{"type": "text", "text": "leftover"}]},
+            {"role": "user", "content": [{"type": "text", "text": "hello"}]},
+            {"role": "assistant", "content": [{"type": "text", "text": "hi"}]},
+        ]
+        save_conversation(user_id, messages)
+        loaded = get_conversation(user_id)
+        assert loaded[0]["role"] == "user"
+        assert len(loaded) == 2
+
+    def test_truncation_drops_leading_assistant(self, ddb, user_id):
+        """After 20-turn cap, if first message is assistant, drop it."""
+        # Build 22 messages: assistant, user, assistant, user, ...
+        messages = []
+        for i in range(22):
+            role = "assistant" if i % 2 == 0 else "user"
+            messages.append({"role": role, "content": [{"type": "text", "text": f"msg {i}"}]})
+        save_conversation(user_id, messages)
+        loaded = get_conversation(user_id)
+        # After truncation [-20:], first message would be assistant (msg 2)
+        # Fix should drop it, leaving 19 messages starting with user
+        assert loaded[0]["role"] == "user"
+        assert all(
+            loaded[i]["role"] != loaded[i + 1]["role"]
+            for i in range(len(loaded) - 1)
+        )
+
+
 class TestByteSizeSafety:
     def test_trims_if_over_350kb(self, ddb, user_id):
         big_text = "x" * 20_000

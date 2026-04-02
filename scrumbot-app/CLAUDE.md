@@ -46,6 +46,7 @@ scrumbot-app/
 │   ├── guards.py           # check_message(), check_rate_limit()
 │   ├── classifier.py       # Intent classification (Haiku) — feedback/remind_me/help/conversation
 │   ├── sms.py              # Twilio Client wrapper — send_sms()
+│   ├── timezone.py         # Area code → IANA timezone inference for onboarding
 │   └── validators.py       # Post-generation response validation (jargon, length, empty)
 └── tests/
 ```
