@@ -1,13 +1,104 @@
+from datetime import date, timedelta
 from decimal import Decimal
 
 from shared.tools import (
-    create_project, update_project, create_work_cycle, list_active_projects,
+    resolve_date,
+    create_project, update_project, archive_project,
+    create_work_cycle, list_active_projects,
     create_task, update_task_status, get_cycle_data,
     create_checkin, flag_blocker, get_pace_history, get_user_patterns,
     record_velocity, update_user_patterns, complete_onboarding,
     set_user_preference,
     create_habit, complete_habit, list_habits,
 )
+
+
+# ---------------------------------------------------------------------------
+# Date resolution (no DynamoDB needed — pure logic)
+# ---------------------------------------------------------------------------
+
+class TestResolveDate:
+    def test_already_yyyy_mm_dd(self):
+        result = resolve_date(expression="2026-09-15")
+        assert result["date"] == "2026-09-15"
+
+    def test_in_3_months(self):
+        result = resolve_date(expression="in 3 months")
+        assert "date" in result
+        parsed = date.fromisoformat(result["date"])
+        assert parsed > date.today()
+
+    def test_in_2_weeks(self):
+        result = resolve_date(expression="in 2 weeks")
+        expected = date.today() + timedelta(weeks=2)
+        assert result["date"] == expected.isoformat()
+
+    def test_in_5_days(self):
+        result = resolve_date(expression="in 5 days")
+        expected = date.today() + timedelta(days=5)
+        assert result["date"] == expected.isoformat()
+
+    def test_end_of_year(self):
+        result = resolve_date(expression="end of year")
+        assert "date" in result
+        parsed = date.fromisoformat(result["date"])
+        assert parsed.month == 12
+        assert parsed.day == 31
+
+    def test_end_of_the_year(self):
+        result = resolve_date(expression="end of the year")
+        assert "date" in result
+
+    def test_by_june(self):
+        result = resolve_date(expression="by June")
+        assert "date" in result
+        parsed = date.fromisoformat(result["date"])
+        assert parsed.month == 6
+
+    def test_by_december(self):
+        result = resolve_date(expression="by December")
+        assert "date" in result
+        parsed = date.fromisoformat(result["date"])
+        assert parsed.month == 12
+
+    def test_next_month(self):
+        result = resolve_date(expression="next month")
+        assert "date" in result
+        parsed = date.fromisoformat(result["date"])
+        assert parsed > date.today()
+
+    def test_tomorrow(self):
+        result = resolve_date(expression="tomorrow")
+        expected = date.today() + timedelta(days=1)
+        assert result["date"] == expected.isoformat()
+
+    def test_end_of_q2(self):
+        result = resolve_date(expression="end of Q2")
+        assert "date" in result
+        parsed = date.fromisoformat(result["date"])
+        assert parsed.month == 6
+        assert parsed.day == 30
+
+    def test_1_year(self):
+        result = resolve_date(expression="in 1 year")
+        parsed = date.fromisoformat(result["date"])
+        assert parsed.year == date.today().year + 1
+
+    def test_gibberish_returns_error(self):
+        result = resolve_date(expression="whenever I feel like it")
+        assert "error" in result
+
+    def test_past_month_rolls_to_next_year(self):
+        """If user says 'by January' and it's April, should give next January."""
+        result = resolve_date(expression="by January")
+        parsed = date.fromisoformat(result["date"])
+        assert parsed > date.today()
+
+    def test_3_months_from_now(self):
+        result = resolve_date(expression="3 months from now")
+        assert "date" in result
+        parsed = date.fromisoformat(result["date"])
+        assert parsed > date.today()
 
 
 # ---------------------------------------------------------------------------
@@ -26,6 +117,24 @@ class TestValidation:
     def test_create_project_bad_date(self):
         result = create_project(user_id="u1", name="T", description="", target_date="not-a-date")
         assert "YYYY-MM-DD" in result["error"]
+
+    def test_create_project_past_date(self):
+        result = create_project(user_id="u1", name="T", description="", target_date="2025-01-01")
+        assert "error" in result
+        assert "past" in result["error"].lower()
+
+    def test_update_project_past_date(self):
+        result = update_project(project_id="p1", target_date="2020-06-15")
+        assert "error" in result
+        assert "past" in result["error"].lower()
+
+    def test_create_project_today_is_allowed(self):
+        """Today's date should be accepted — it's not in the past."""
+        from datetime import date
+        today = date.today().isoformat()
+        # Will fail on missing user_id in DDB, but should NOT fail on date validation
+        result = create_project(user_id="u1", name="T", description="", target_date=today)
+        assert "past" not in result.get("error", "").lower()
 
     def test_create_task_invalid_estimate(self):
         result = create_task(title="T", description="", estimate="Z", cycle_id="c1")
@@ -112,6 +221,26 @@ class TestProjectTools:
     def test_update_project_not_found(self, ddb):
         result = update_project(project_id="nonexistent", name="X")
         assert "not found" in result["error"]
+
+    def test_archive_project(self, seeded_project):
+        user_id, project_id = seeded_project
+        result = archive_project(project_id=project_id)
+        assert result["archived"] is True
+        assert result["project_id"] == project_id
+
+    def test_archived_project_hidden_from_list(self, seeded_project):
+        user_id, project_id = seeded_project
+        archive_project(project_id=project_id)
+        result = list_active_projects(user_id=user_id)
+        assert len(result["projects"]) == 0
+
+    def test_archive_nonexistent_project(self, ddb):
+        result = archive_project(project_id="nonexistent")
+        assert "not found" in result["error"].lower()
+
+    def test_archive_missing_project_id(self):
+        result = archive_project(project_id="")
+        assert "error" in result
 
 
 # ---------------------------------------------------------------------------

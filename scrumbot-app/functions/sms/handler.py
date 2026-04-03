@@ -48,7 +48,9 @@ from shared.db import (
     get_latest_outbound, set_outbound_replied,
 )
 from shared.tools import (
-    create_project, update_project, create_work_cycle, list_active_projects,
+    resolve_date,
+    create_project, update_project, archive_project,
+    create_work_cycle, list_active_projects,
     create_task, update_task_status, get_cycle_data,
     create_checkin, flag_blocker, get_pace_history, get_user_patterns,
     record_velocity, update_user_patterns, complete_onboarding,
@@ -64,7 +66,9 @@ app = APIGatewayHttpResolver()
 SMS_MAX_CHARS = 1600   # Twilio hard limit (safety net in _twiml)
 
 TOOLS = [
-    create_project, update_project, create_work_cycle, list_active_projects,
+    resolve_date,
+    create_project, update_project, archive_project,
+    create_work_cycle, list_active_projects,
     create_task, update_task_status, get_cycle_data,
     create_checkin, flag_blocker, get_pace_history, get_user_patterns,
     record_velocity, update_user_patterns, complete_onboarding,
@@ -362,8 +366,12 @@ def _build_user_context(user_id: str, user: dict, is_new_user: bool,
     tone = user.get("preferred_tone", "balanced")
     name = user.get("name", "")
 
+    from datetime import date as _date
+    today = _date.today().isoformat()
+
     lines = [
-        f"\nCurrent user_id: {user_id}",
+        f"\nToday's date: {today}",
+        f"Current user_id: {user_id}",
         f"User's timezone: {tz}",
         f"Coaching tone: {tone}",
     ]

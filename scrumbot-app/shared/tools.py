@@ -1,4 +1,5 @@
-from datetime import datetime, timezone
+import re
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 
 from boto3.dynamodb.conditions import Key
@@ -16,6 +17,137 @@ VALID_PREFERENCES = {"timezone", "checkin_time", "evening_time", "planning_day",
 
 
 # ---------------------------------------------------------------------------
+# Date resolution
+# ---------------------------------------------------------------------------
+
+# Patterns: "in 3 months", "3 months", "in 2 weeks", "6 weeks", "in 1 year"
+_RELATIVE_RE = re.compile(
+    r"(?:in\s+)?(\d+)\s+(day|week|month|year)s?(?:\s+from\s+(?:now|today))?",
+    re.IGNORECASE,
+)
+
+# Named phrases → (month, day) or special keys
+_NAMED_DATES = {
+    "end of year": (12, 31),
+    "end of the year": (12, 31),
+    "new year": (1, 1),  # next year
+    "end of q1": (3, 31),
+    "end of q2": (6, 30),
+    "end of q3": (9, 30),
+    "end of q4": (12, 31),
+}
+
+_MONTH_NAMES = {
+    "january": 1, "february": 2, "march": 3, "april": 4,
+    "may": 5, "june": 6, "july": 7, "august": 8,
+    "september": 9, "october": 10, "november": 11, "december": 12,
+    "jan": 1, "feb": 2, "mar": 3, "apr": 4,
+    "jun": 6, "jul": 7, "aug": 8, "sep": 9, "sept": 9,
+    "oct": 10, "nov": 11, "dec": 12,
+}
+
+
+def _last_day_of_month(year: int, month: int) -> int:
+    """Return the last day of a given month."""
+    import calendar
+    return calendar.monthrange(year, month)[1]
+
+
+@tool
+def resolve_date(expression: str) -> dict:
+    """
+    Convert a natural language date expression into YYYY-MM-DD format.
+
+    ALWAYS call this tool when a user gives a date that is not already in YYYY-MM-DD format.
+    Examples: "in 3 months", "end of year", "by June", "next March", "6 weeks from now",
+    "in 2 weeks", "by December", "end of Q2".
+
+    Do NOT try to calculate dates yourself — always use this tool.
+
+    Params:
+      expression: The user's date expression (e.g. "in 3 months", "end of year", "by June").
+
+    Returns on success:
+      {"date": "YYYY-MM-DD", "interpreted_as": str}
+
+    Returns on error:
+      {"error": str}
+    """
+    try:
+        text = expression.strip().lower()
+        today = date.today()
+
+        # 1. Already YYYY-MM-DD?
+        if re.match(r"^\d{4}-\d{2}-\d{2}$", text):
+            return {"date": text, "interpreted_as": text}
+
+        # 2. Named phrases: "end of year", "end of Q2", etc.
+        for phrase, (month, day) in _NAMED_DATES.items():
+            if phrase in text:
+                year = today.year
+                target = date(year, month, day)
+                if target <= today:
+                    target = date(year + 1, month, day)
+                return {"date": target.isoformat(), "interpreted_as": f"{phrase} → {target.isoformat()}"}
+
+        # 3. Relative: "in 3 months", "2 weeks", "1 year"
+        m = _RELATIVE_RE.search(text)
+        if m:
+            amount = int(m.group(1))
+            unit = m.group(2).lower()
+            if unit == "day":
+                target = today + timedelta(days=amount)
+            elif unit == "week":
+                target = today + timedelta(weeks=amount)
+            elif unit == "month":
+                new_month = today.month + amount
+                new_year = today.year + (new_month - 1) // 12
+                new_month = ((new_month - 1) % 12) + 1
+                new_day = min(today.day, _last_day_of_month(new_year, new_month))
+                target = date(new_year, new_month, new_day)
+            elif unit == "year":
+                target = date(today.year + amount, today.month, today.day)
+            else:
+                return {"error": f"Unknown unit: {unit}"}
+            return {"date": target.isoformat(), "interpreted_as": f"{amount} {unit}(s) from today → {target.isoformat()}"}
+
+        # 4. Month name: "by June", "next March", "in September"
+        for name, month_num in _MONTH_NAMES.items():
+            if name in text:
+                year = today.year
+                # Last day of that month
+                day = _last_day_of_month(year, month_num)
+                target = date(year, month_num, day)
+                if target <= today:
+                    year += 1
+                    day = _last_day_of_month(year, month_num)
+                    target = date(year, month_num, day)
+                return {"date": target.isoformat(), "interpreted_as": f"end of {name.title()} {year} → {target.isoformat()}"}
+
+        # 5. "tomorrow"
+        if "tomorrow" in text:
+            target = today + timedelta(days=1)
+            return {"date": target.isoformat(), "interpreted_as": f"tomorrow → {target.isoformat()}"}
+
+        # 6. "next week" / "next month"
+        if "next week" in text:
+            target = today + timedelta(weeks=1)
+            return {"date": target.isoformat(), "interpreted_as": f"next week → {target.isoformat()}"}
+        if "next month" in text:
+            new_month = today.month + 1
+            new_year = today.year + (new_month - 1) // 12
+            new_month = ((new_month - 1) % 12) + 1
+            day = _last_day_of_month(new_year, new_month)
+            target = date(new_year, new_month, day)
+            return {"date": target.isoformat(), "interpreted_as": f"end of next month → {target.isoformat()}"}
+
+        return {"error": f"Could not interpret '{expression}'. Ask the user for a specific date or timeframe like 'in 3 months' or 'by June'."}
+    except Exception as e:
+        logger.exception("resolve_date failed")
+        return {"error": str(e)}
+
+
+# ---------------------------------------------------------------------------
 # Projects
 # ---------------------------------------------------------------------------
 
@@ -29,6 +161,9 @@ def create_project(user_id: str, name: str, description: str, target_date: str =
       name: Short project name — this is the user's goal (required).
       description: What the project is about (optional, can be empty).
       target_date: When the user wants to achieve this goal, in YYYY-MM-DD format.
+                   If the user gives a relative date (e.g. "in 3 months", "by June",
+                   "end of year"), call resolve_date FIRST to get the YYYY-MM-DD value,
+                   then pass it here. Must be today or later — past dates are rejected.
                    Empty string if the goal is ongoing with no deadline.
 
     Returns on success:
@@ -43,9 +178,11 @@ def create_project(user_id: str, name: str, description: str, target_date: str =
 
         if target_date:
             try:
-                datetime.strptime(target_date, "%Y-%m-%d")
+                parsed = datetime.strptime(target_date, "%Y-%m-%d").date()
             except ValueError:
                 return {"error": f"target_date must be YYYY-MM-DD format, got: {target_date}"}
+            if parsed < date.today():
+                return {"error": f"target_date is in the past ({target_date}). Use a future date."}
 
         project = Project(user_id=user_id, name=name, description=description, target_date=target_date)
         item = project.model_dump()
@@ -74,6 +211,7 @@ def update_project(project_id: str, name: str = "", description: str = "", targe
       name: New project name (empty string = no change).
       description: New description (empty string = no change).
       target_date: New target date in YYYY-MM-DD format (empty string = no change).
+                   If relative, call resolve_date first. Must be today or later.
 
     Returns on success:
       {"project_id": str, "updated_fields": list}
@@ -87,9 +225,11 @@ def update_project(project_id: str, name: str = "", description: str = "", targe
 
         if target_date:
             try:
-                datetime.strptime(target_date, "%Y-%m-%d")
+                parsed = datetime.strptime(target_date, "%Y-%m-%d").date()
             except ValueError:
                 return {"error": f"target_date must be YYYY-MM-DD format, got: {target_date}"}
+            if parsed < date.today():
+                return {"error": f"target_date is in the past ({target_date}). Use a future date."}
 
         table = get_table()
 
@@ -137,6 +277,55 @@ def update_project(project_id: str, name: str = "", description: str = "", targe
         return {"project_id": project_id, "updated_fields": updated_fields}
     except Exception as e:
         logger.exception("update_project failed")
+        return {"error": str(e)}
+
+
+@tool
+def archive_project(project_id: str) -> dict:
+    """
+    Archive a project (goal). The project is hidden from the user's active
+    and backlog lists but kept in the database for pattern analysis.
+
+    Use this when a user says they want to drop, remove, delete, or cancel a goal.
+    Do NOT actually delete the data — archiving preserves history.
+
+    Params:
+      project_id: The project UUID to archive (required).
+
+    Returns on success:
+      {"project_id": str, "archived": true}
+
+    Returns on error:
+      {"error": str}
+    """
+    try:
+        if not project_id:
+            return {"error": "project_id is required"}
+
+        table = get_table()
+
+        # Look up project via GSI to get its PK/SK
+        resp = table.query(
+            IndexName="gsi1",
+            KeyConditionExpression=Key("gsi1pk").eq(f"PROJECT#{project_id}") & Key("gsi1sk").eq("#METADATA"),
+        )
+        items = resp.get("Items", [])
+        if not items:
+            return {"error": f"Project {project_id} not found"}
+
+        item = items[0]
+        now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+        table.update_item(
+            Key={"pk": item["pk"], "sk": item["sk"]},
+            UpdateExpression="SET archived = :t, archived_at = :now",
+            ExpressionAttributeValues={":t": True, ":now": now},
+        )
+
+        logger.info("Project archived", project_id=project_id, user_id=item["pk"])
+        return {"project_id": project_id, "archived": True}
+    except Exception as e:
+        logger.exception("archive_project failed")
         return {"error": str(e)}
 
 
@@ -234,6 +423,10 @@ def list_active_projects(user_id: str) -> dict:
 
         projects = []
         for p in project_items:
+            # Skip archived projects
+            if p.get("archived"):
+                continue
+
             project_id = p.get("project_id")
             active_cycle = None
 
