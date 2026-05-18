@@ -1,4 +1,4 @@
-.PHONY: up down build push deploy test chat logs-sms logs-scheduler feedback feedback-user deploy-site analyze analyze-cost analyze-quality analyze-week conversations conversations-user conversations-all
+.PHONY: up down build push deploy test eval-l1 eval-l2 eval-classifier chat logs-sms logs-scheduler feedback feedback-user deploy-site analyze analyze-cost analyze-quality analyze-week conversations conversations-user conversations-all
 
 # ── Config ────────────────────────────────────────────────────────────────────
 TABLE ?= stride-prod
@@ -12,6 +12,15 @@ down:
 
 test:
 	cd scrumbot-app && .venv/bin/python -m pytest tests/ -v
+
+eval-l1:
+	cd scrumbot-app && .venv/bin/python -m pytest evals/l1/test_assertions.py evals/regression/ -v --tb=short -m "not integration"
+
+eval-l2:
+	cd scrumbot-app && ANTHROPIC_API_KEY=$(ANTHROPIC_API_KEY) .venv/bin/python -m pytest evals/l2/ -v -s -m nightly
+
+eval-classifier:
+	cd scrumbot-app && ANTHROPIC_API_KEY=$(ANTHROPIC_API_KEY) .venv/bin/python -m pytest evals/l1/test_classifier.py -v -m integration
 
 chat:
 	cd scrumbot-app && PYTHONPATH=. .venv/bin/python chat.py

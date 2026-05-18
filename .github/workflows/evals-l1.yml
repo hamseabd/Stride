@@ -1,0 +1,17 @@
+name: Evals — L1 (PR gate)
+on:
+  pull_request:
+    branches: [main]
+    paths: ["scrumbot-app/**"]
+jobs:
+  l1-evals:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: cd scrumbot-app && pip install -r requirements.txt -r requirements-dev.txt
+      - name: L1 assertions + regression
+        run: cd scrumbot-app && python -m pytest evals/l1/test_assertions.py evals/regression/ -v --tb=short -m "not integration"
+      - name: Unit tests (must not regress)
+        run: cd scrumbot-app && python -m pytest tests/ -v --tb=short
