@@ -455,8 +455,14 @@ def get_conversation(user_id: str) -> list:
         # Validate: strip ALL tool_result blocks from user messages and
         # ALL tool_use blocks from assistant messages. This prevents the
         # "unexpected tool_use_id" API 400 error caused by orphaned pairs.
-        tool_result_types = {"toolResult", "tool_result"}
-        tool_use_types = {"toolUse", "tool_use"}
+        # Strands SDK uses Bedrock/Converse format: {"toolResult": {...}} and
+        # {"toolUse": {...}} as top-level keys (no "type" field). Must check both.
+        def _is_tool_result(block: dict) -> bool:
+            return block.get("type") in ("toolResult", "tool_result") or "toolResult" in block
+
+        def _is_tool_use(block: dict) -> bool:
+            return block.get("type") in ("toolUse", "tool_use") or "toolUse" in block
+
         validated = []
         for msg in loaded:
             if not isinstance(msg, dict):
@@ -467,12 +473,12 @@ def get_conversation(user_id: str) -> list:
                 validated.append(msg)
                 continue
             if role == "user":
-                cleaned = [c for c in content if not (isinstance(c, dict) and c.get("type") in tool_result_types)]
+                cleaned = [c for c in content if not (isinstance(c, dict) and _is_tool_result(c))]
                 if not cleaned:
                     continue  # entire message was tool_results — drop it
                 validated.append({"role": "user", "content": cleaned})
             elif role == "assistant":
-                cleaned = [c for c in content if not (isinstance(c, dict) and c.get("type") in tool_use_types)]
+                cleaned = [c for c in content if not (isinstance(c, dict) and _is_tool_use(c))]
                 if not cleaned:
                     continue  # entire message was tool_uses — drop it
                 validated.append({"role": "assistant", "content": cleaned})
@@ -512,8 +518,13 @@ def save_conversation(user_id: str, messages: list, planning_day: int = 1, user_
     Returns True on success, False on error.
     """
     try:
-        tool_types_result = {"toolResult", "tool_result"}
-        tool_types_use = {"toolUse", "tool_use"}
+        # Strands SDK uses Bedrock/Converse format: {"toolResult": {...}} and
+        # {"toolUse": {...}} as top-level keys (no "type" field). Must check both.
+        def _is_tool_result(block: dict) -> bool:
+            return block.get("type") in ("toolResult", "tool_result") or "toolResult" in block
+
+        def _is_tool_use(block: dict) -> bool:
+            return block.get("type") in ("toolUse", "tool_use") or "toolUse" in block
 
         stripped = []
         for msg in messages:
@@ -523,14 +534,14 @@ def save_conversation(user_id: str, messages: list, planning_day: int = 1, user_
             content = msg.get("content", [])
             if role == "user":
                 if isinstance(content, list):
-                    cleaned = [c for c in content if not (isinstance(c, dict) and c.get("type") in tool_types_result)]
+                    cleaned = [c for c in content if not (isinstance(c, dict) and _is_tool_result(c))]
                     if cleaned:
                         stripped.append({"role": "user", "content": cleaned})
                 elif isinstance(content, str):
                     stripped.append(msg)
             elif role == "assistant":
                 if isinstance(content, list):
-                    cleaned = [c for c in content if not (isinstance(c, dict) and c.get("type") in tool_types_use)]
+                    cleaned = [c for c in content if not (isinstance(c, dict) and _is_tool_use(c))]
                     if cleaned:
                         stripped.append({"role": "assistant", "content": cleaned})
                 elif isinstance(content, str):

@@ -653,6 +653,16 @@ def sms():
                         is_new_user=True,
                         user=user,
                     )
+                    warnings = validate_response(reply, user_id=user_id)
+                    if warnings.get("empty"):
+                        reply = _WELCOME
+                    elif warnings.get("length_exceeded"):
+                        truncated = reply[:MAX_SMS_CHARS]
+                        last_break = max(
+                            truncated.rfind(". "), truncated.rfind(".\n"),
+                            truncated.rfind("? "), truncated.rfind("! "),
+                        )
+                        reply = truncated[:last_break + 1] if last_break > 0 else truncated
                     send_sms(user_id, reply)
                     logger.info("Onboarding agent fired", user_id=user_id)
                 else:
@@ -724,7 +734,7 @@ def sms():
     try:
         reply = _call_agent(user_id=user_id, message=message, is_new_user=is_new_user,
                             user=user, latest_outbound=latest_out)
-        warnings = validate_response(reply)
+        warnings = validate_response(reply, user_id=user_id)
         if warnings.get("empty"):
             reply = _ERROR_REPLY
         elif warnings.get("length_exceeded"):
