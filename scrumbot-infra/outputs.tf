@@ -37,3 +37,13 @@ output "site_url" {
   description = "S3 website URL for the Stride site"
   value       = "http://${aws_s3_bucket_website_configuration.site.website_endpoint}"
 }
+
+output "github_actions_role_arn" {
+  description = "ARN of the WRITE OIDC role (apply, main only) — set as the AWS_ROLE_ARN repo secret"
+  value       = aws_iam_role.github_actions.arn
+}
+
+output "github_actions_plan_role_arn" {
+  description = "ARN of the READ OIDC role (plan, PRs only) — set as the AWS_PLAN_ROLE_ARN repo secret"
+  value       = aws_iam_role.github_actions_plan.arn
+}
