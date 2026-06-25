@@ -49,6 +49,11 @@ jobs:
         id: meta
         run: echo "tag=sha-${{ github.sha }}" >> $GITHUB_OUTPUT
 
+      # The runner is amd64 but images target linux/arm64 (Graviton Lambda).
+      # QEMU registers binfmt handlers so the cross-arch `RUN pip install` works.
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
