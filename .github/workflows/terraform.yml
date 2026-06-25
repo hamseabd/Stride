@@ -8,6 +8,7 @@ on:
       - "scrumbot-infra/**"
       - "scrumbot-app/**"
       - "scripts/**"
+      - ".github/workflows/terraform.yml"
   pull_request:
     branches:
       - main
@@ -15,6 +16,8 @@ on:
       - "scrumbot-infra/**"
       - "scrumbot-app/**"
       - "scripts/**"
+      - ".github/workflows/terraform.yml"
+  workflow_dispatch:
 
 permissions:
   id-token: write   # required for OIDC
