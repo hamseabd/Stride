@@ -52,6 +52,10 @@ terraform.rc
 
 scrumbot-app/local_server.py
 scrumbot-app/requirement-dev.txt
-plan.md
+
+# Dumped prod conversation traces for eval calibration — real user data, never commit
+scrumbot-app/evals/fixtures/raw/
+
 CEO/
 cost/
+docs/internal/

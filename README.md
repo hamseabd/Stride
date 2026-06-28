@@ -1,190 +1,106 @@
 # Stride
 
-An AI productivity coach delivered via SMS. Text your goals, check in daily, review your week. No app. No login. No dashboard. Just your phone.
+**An AI productivity coach that lives in your texts.** No app, no login, no dashboard — Stride texts *you*, you text back, and it keeps you honest about what you said you'd finish.
 
-The Scrum framework runs entirely under the hood — users never see it. Plain language only.
+Most productivity tools wait to be opened. Stride pushes first: a daily check-in, a weekly review, a nudge when you've over-committed. The agile machinery underneath (estimates, cycles, velocity, pattern detection) never surfaces — users only ever see plain language.
+
+> Built solo, deployed on AWS, dogfooded daily. This repo is the whole thing: the agent, the infrastructure, and the eval suite that keeps it from regressing.
+
+---
+
+## Why it's interesting
+
+- **Push, not pull.** A scheduler Lambda decides when to reach out — the proactive message *is* the product. A to-do app doesn't know you; Stride accrues a per-user pattern record (where you overcommit, what you underestimate, what stays blocked) and adapts its tone and timing.
+- **Two Lambdas, one table.** Everything runs on `stride-sms` (inbound) and `stride-scheduler` (outbound, every 15 min) over a single DynamoDB table. No relational sprawl, no second datastore.
+- **Every inbound SMS clears a guard chain** — Twilio signature → rate limit → consent → intent classifier — before it ever reaches the model. TCPA consent and a 50-msg/day atomic counter are enforced, not aspirational.
+- **The agent never improvises its tools.** All 21 tools are declared with the Strands SDK; context is pre-loaded before each turn, history is capped at 20 turns, and every reply is validated (length, jargon, PII) before it's sent.
+- **Tested like production, judged like production.** 261 unit tests plus a three-tier eval suite — deterministic checks gate every PR; an LLM-as-judge (a *different* model family, to avoid a model grading itself) runs nightly.
 
 ---
 
 ## How it works
 
-Text Stride's number. It walks you through 5 types of sessions:
+<p align="center">
+  <img src="docs/assets/architecture.png" alt="Stride architecture — inbound SMS flows through stride-sms (guard chain → intent classifier → Strands agent); stride-scheduler pushes proactive SMS on a 15-minute EventBridge timer; both Lambdas share one DynamoDB table." width="900">
+</p>
+
+A first-time user is walked through setup; from then on the conversation flows through five session types:
 
 | Session | What happens |
 |---|---|
-| **Get set up** | First time only. Tell Stride what you're working on. It creates your projects and plans your first week. |
-| **Plan your week** | Commit to what's realistic. Stride challenges overcommitting and breaks big things down. |
-| **Daily check-in** | 3 questions fast: what did you do, what are you doing today, anything blocking you? |
-| **Weekly review** | Planned vs done. Honest numbers. One pattern. One change. |
-| **Adjust your plan** | Add tasks, drop tasks, re-estimate when things change mid-week. |
+| **Set up** | Tell Stride what you're working on. It creates your projects and plans week one. |
+| **Plan your week** | Commit to what's realistic. It challenges overcommitting and breaks big work down. |
+| **Daily check-in** | Three fast questions: did / doing / blocked. |
+| **Weekly review** | Planned vs. done — honest numbers, one pattern, one change. |
+| **Adjust** | Add, drop, or re-estimate mid-week when reality shifts. |
 
-**Estimates:** S (a few hours), M (a day or two), L (most of the week), XL (more than a week — Stride flags this as risky).
+Estimates stay human: **S** (a few hours) · **M** (a day or two) · **L** (most of the week) · **XL** (more than a week — flagged as scope risk).
 
 ---
 
-## Architecture
+## Stack
 
-```
-SMS → Twilio → POST /sms → stride-sms Lambda
-                              ↓
-                         Guard chain (signature, rate limit, consent)
-                              ↓
-                         Strands Agent (Claude claude-sonnet-4-6)
-                              ↓
-                         19 tools → DynamoDB (stride-prod)
-```
-
-| Component | Choice |
+| | |
 |---|---|
-| Compute | AWS Lambda Python 3.12, ARM64 (Graviton) |
-| Database | DynamoDB — single-table design |
-| Agent | Strands SDK + Claude claude-sonnet-4-6 via Anthropic API |
-| Messaging | Twilio A2P 10DLC SMS |
-| IaC | Terraform + serverless.tf modules |
-| Observability | AWS Lambda Powertools v3 (structured logging, X-Ray tracing) |
-| Deploy | Lambda container images pushed to ECR |
-| CI/CD | GitHub Actions — OIDC auth, Docker build + Terraform apply |
+| **Agent** | Strands SDK · Claude Sonnet 4.6 via the Anthropic API |
+| **Compute** | AWS Lambda · Python 3.12 · ARM64 (Graviton) · container images |
+| **Data** | DynamoDB — single-table design, `PAY_PER_REQUEST` |
+| **Messaging** | Twilio A2P 10DLC SMS |
+| **IaC** | Terraform + serverless.tf modules · S3/DynamoDB remote state |
+| **Observability** | AWS Lambda Powertools v3 — structured telemetry per call (tokens, latency, cost, cache hits) |
+| **CI/CD** | GitHub Actions — OIDC auth (no long-lived keys), Docker build → `terraform apply` |
 
 ---
 
-## Repo structure
+## Evals
 
-```
-ScrumAgent/
-├── scrumbot-app/           # Python application code
-│   ├── functions/
-│   │   └── sms/            # POST /sms — Twilio webhook + full guard chain
-│   ├── shared/
-│   │   ├── tools.py        # 19 Strands @tool functions
-│   │   ├── db.py           # DynamoDB client, consent, rate limit, user bootstrap, conversation, feedback
-│   │   ├── models.py       # 9 Pydantic v2 models (incl. Habit)
-│   │   ├── prompt.py       # STRIDE_SYSTEM_PROMPT — single source of truth
-│   │   └── guards.py       # Message validation + rate limiting
-│   ├── Dockerfile          # Production Lambda image (ARG FUNCTION=sms)
-│   └── Dockerfile.dev      # Local dev image (Flask, same base as Lambda)
-├── scrumbot-infra/         # Terraform infrastructure
-│   ├── bootstrap/          # One-time: S3 state bucket + DynamoDB lock table
-│   ├── lambda.tf           # stride-sms Lambda (container image)
-│   ├── api_gateway.tf      # HTTP API — POST /sms
-│   ├── dynamodb.tf         # stride-prod table + GSI
-│   ├── ecr.tf              # stride-sms ECR repo + lifecycle policy
-│   ├── iam.tf              # Lambda exec role + ECR push policy
-│   └── variables.tf        # image_tag, secrets, region, table name
-├── scripts/
-│   ├── build_and_push.sh   # Build stride-sms image (linux/arm64) + push to ECR
-│   └── deploy_site.sh      # Sync site HTML to S3 bucket
-├── docker-compose.yml      # Local dev: LocalStack + DynamoDB init + Flask server
-├── Makefile                # Developer shortcuts
-└── docs/
-    ├── status.md           # Project status tracker
-    └── legal/              # Privacy policy + Terms of service (superseded by HTML site)
-```
+Quality is enforced in CI, not vibes:
 
----
-
-## Live endpoints
-
-**API:** `https://cbkpntvax6.execute-api.us-east-1.amazonaws.com`
-
-| Method | Path | Lambda | Purpose |
-|---|---|---|---|
-| POST | `/sms` | `stride-sms` | Twilio webhook |
-
----
-
-## Local development
-
-Prerequisites: Docker Desktop, AWS CLI (for LocalStack credential passthrough)
+- **L1 — deterministic** (gates every PR, <5s, $0): length, jargon, PII, tool-arg correctness, onboarding order. These delegate to the *same* validator the production path runs, so a check can't pass in CI while drifting in prod.
+- **L2 — LLM-as-judge** (nightly): tool selection and coaching tone, scored critique-then-verdict by a cross-family model to avoid self-preference bias.
+- **Regression**: every fixed production bug becomes a permanent moto-backed test.
 
 ```bash
-# Copy env template and fill in your Anthropic key
-cp scrumbot-app/.env.example scrumbot-app/.env
-
-# Start local stack — LocalStack + DynamoDB init + Flask dev server
-make up
-# API available at http://localhost:8000
-
-# Stop and clean up volumes
-make down
+make eval-l1   # deterministic, no API key needed
+make eval-l2   # nightly judge
 ```
 
-The local stack uses the same Linux ARM64 Python image as Lambda — no platform surprises.
-
 ---
+
+## Run it locally
+
+```bash
+cp scrumbot-app/.env.example scrumbot-app/.env   # add your Anthropic key
+make up                                          # LocalStack + DynamoDB + Flask, on http://localhost:8000
+make test                                        # 261 tests
+make chat                                         # interactive SMS simulator
+```
+
+The local image is the same Linux/ARM64 Python base as Lambda — no platform surprises.
 
 ## Deploy
 
-Prerequisites: AWS CLI configured, Terraform installed, Docker Desktop running.
-
-**First time only — bootstrap Terraform state:**
 ```bash
-cd scrumbot-infra/bootstrap
-terraform init && terraform apply
+cd scrumbot-infra/bootstrap && terraform init && terraform apply   # one-time: remote state
+cp scrumbot-infra/terraform.tfvars.example scrumbot-infra/terraform.tfvars   # add secrets
+make deploy                                                        # build → push → terraform apply
 ```
 
-**Create secrets file:**
-```bash
-cp scrumbot-infra/terraform.tfvars.example scrumbot-infra/terraform.tfvars
-# Fill in: anthropic_api_key, twilio_auth_token, twilio_account_sid, twilio_phone_number
-```
-
-**Build images + deploy infrastructure:**
-```bash
-make deploy
-```
-
-This runs `build_and_push.sh` (builds the stride-sms image for linux/arm64, pushes to ECR) then `terraform apply`.
-
-**CI/CD:** On push to `main`, GitHub Actions builds images tagged `sha-{git_sha}`, then runs `terraform apply` with that tag. Requires `AWS_ROLE_ARN`, `ANTHROPIC_API_KEY`, `TWILIO_AUTH_TOKEN`, `TWILIO_ACCOUNT_SID`, `TWILIO_PHONE_NUMBER` as GitHub secrets.
+On push to `main`, CI builds SHA-tagged images and applies Terraform. Secrets (`AWS_ROLE_ARN`, `ANTHROPIC_API_KEY`, Twilio credentials) live in GitHub Actions — never in the repo.
 
 ---
 
-## Twilio SMS setup
+## Repo layout
 
-1. Buy a 10DLC phone number in the Twilio Console
-2. Set the webhook URL: `{api_gateway_url}/sms` (HTTP POST)
-3. Register an A2P 10DLC campaign (required for US SMS delivery)
-4. Publish Privacy Policy and Terms of Service to a live URL (required for A2P registration)
-
-Users opt in by replying YES to the first message. STOP unsubscribes immediately. 50 messages/day rate limit enforced per user.
-
----
-
-## Makefile targets
-
-```bash
-make up            # Start local dev stack (docker compose up --build)
-make down          # Stop and remove volumes
-make test          # Run test suite (104 tests)
-make chat          # Interactive SMS simulator (chat.py)
-make build         # Build + push images tagged :latest
-make push          # Build + push images tagged sha-{git short hash}
-make deploy        # push + terraform apply (builds stride-sms image)
-make deploy-site   # Sync site HTML to S3
-make logs-sms      # Tail CloudWatch for stride-sms
-make feedback      # Scan all feedback entries (dev tool)
-make feedback-user USER=+1... # Query one user's feedback
+```
+scrumbot-app/      Python — handlers (sms, scheduler), shared lib, tools, tests, evals
+scrumbot-infra/    Terraform — Lambdas, API Gateway, DynamoDB, ECR, IAM, EventBridge
+scripts/           build/push images, deploy the marketing site
+docs/legal/        privacy policy + terms of service
 ```
 
+The data model is one DynamoDB table; access patterns and the locked schema live in [`scrumbot-app/CLAUDE.md`](scrumbot-app/CLAUDE.md).
+
 ---
 
-## DynamoDB single-table design
-
-One table, no joins. All data accessed by `pk` + `sk` or via `gsi1`.
-
-| Entity | PK | SK |
-|---|---|---|
-| User | `USER#{user_id}` | `#METADATA` |
-| Project | `USER#{user_id}` | `PROJECT#{project_id}` |
-| Work cycle | `PROJECT#{project_id}` | `CYCLE#{cycle_id}` |
-| Task | `CYCLE#{cycle_id}` | `TASK#{task_id}` |
-| Check-in | `USER#{user_id}` | `CHECKIN#{date}#{id}` |
-| Blocker | `TASK#{task_id}` | `BLOCKER#{blocker_id}` |
-| Velocity | `PROJECT#{project_id}` | `VELOCITY#{cycle_id}` |
-| Pattern | `USER#{user_id}` | `PATTERN#AGGREGATE` |
-| Habit | `USER#{user_id}` | `HABIT#{habit_id}` |
-| SMS consent | `USER#{user_id}` | `CONSENT#SMS` |
-| Rate limit | `USER#{user_id}` | `RATELIMIT#{YYYY-MM-DD}` |
-| Blocked log | `USER#{user_id}` | `BLOCKED#{iso_timestamp}` |
-| Conversation | `USER#{user_id}` | `CONVERSATION#CURRENT` |
-| Feedback | `USER#{user_id}` | `FEEDBACK#{iso_timestamp}` |
+<sub>Personal project. Code is shared for reference; it targets one specific AWS account and Twilio number and isn't intended as a turnkey deploy.</sub>

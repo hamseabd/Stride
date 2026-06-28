@@ -39,7 +39,7 @@ scrumbot-app/
 │       └── handler.py      # EventBridge — proactive outbound SMS (every 15 min)
 ├── shared/
 │   ├── __init__.py
-│   ├── tools.py            # ALL Strands @tool definitions (19 tools) — never inline
+│   ├── tools.py            # ALL Strands @tool definitions (21 tools) — never inline
 │   ├── db.py               # boto3 client + consent + user bootstrap + conversation + outbound
 │   ├── models.py           # Pydantic v2 models — one per DynamoDB entity
 │   ├── prompt.py           # STRIDE_SYSTEM_PROMPT + PROMPT_VERSION — single source of truth
@@ -137,12 +137,14 @@ Never use Scan. Every read must be a `get_item` or `query` using PK or GSI.
 
 ## Stride tools (shared/tools.py)
 
-**19 tools total.** All follow the same patterns (Powertools logger, try/except → return dict).
+**21 tools total.** All follow the same patterns (Powertools logger, try/except → return dict).
 
 | Tool | Purpose |
 |---|---|
+| `resolve_date` | Resolve a natural-language date expression to an ISO date |
 | `create_project` | Create a new project for a user (with optional target_date) |
 | `update_project` | Update project name, description, or target_date |
+| `archive_project` | Archive a project (soft-remove from active lists) |
 | `create_work_cycle` | Create a new work cycle (week) under a project |
 | `list_active_projects` | List all projects + their active cycle + target_date |
 | `create_task` | Add a task to a work cycle (S/M/L/XL estimate) |

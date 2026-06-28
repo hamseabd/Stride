@@ -99,7 +99,7 @@ framework runs entirely under the hood; users never see it.
 | v2.1 — Onboarding overhaul (adaptive flow, too-long handling, multi-goal, blocked visibility) | ✅ Done |
 
 - Two Lambdas live: `stride-sms` (POST /sms) and `stride-scheduler` (EventBridge every 15 min).
-- 19 tools, 233 tests pass against LocalStack.
+- 21 tools, 261 unit tests pass (moto-mocked DynamoDB); plus an eval suite (L1/L2/regression).
 - Twilio A2P 10DLC: approved (2026-03-23).
 - Legal pages (privacy policy, ToS) published on S3.
 - Agent telemetry: tokens, latency, cost, cache hits logged per call.
@@ -107,7 +107,7 @@ framework runs entirely under the hood; users never see it.
 - Prompt v2.1: adaptive onboarding, graceful too-long handling, multi-goal support.
 - **Next action: invite beta users** — system is ready.
 
-See `docs/status.md` for detailed infrastructure state and `roadmap.md` for product evolution.
+See `scrumbot-app/CLAUDE.md` for the locked schema and detailed app-level conventions.
 
 ---
 
@@ -118,7 +118,7 @@ See `docs/status.md` for detailed infrastructure state and `roadmap.md` for prod
   - `/functions/scheduler/` — stride-scheduler Lambda handler (EventBridge, proactive SMS)
   - `/shared/` — `tools.py`, `db.py`, `models.py`, `prompt.py`, `guards.py`, `classifier.py`, `sms.py`, `validators.py`, `timezone.py`
 - `scripts/` — deployment and analysis scripts (`build_and_push.sh`, `deploy_site.sh`, `analyze.py`)
-- `docs/` — `status.md`, legal docs
+- `docs/` — `legal/` (privacy policy, terms of service)
 - All Strands tools defined in `shared/tools.py`, never inline
 - Lambda Powertools decorator pattern on every handler
 - Structured telemetry via Powertools Logger — `agent_metrics`, `classifier_metrics`, `scheduler_metrics`, `validation_warning`
@@ -134,7 +134,6 @@ See `docs/status.md` for detailed infrastructure state and `roadmap.md` for prod
 - Flag scope creep immediately
 - Give clear recommendations with a one-line rationale
 - No "it depends" without a concrete default
-- Read `status.md` at the start of a session to understand current state
 - Reference `scrumbot-app/CLAUDE.md` for all schema questions — it is the locked source of truth
 
 **When asked to PLAN → produce:**
