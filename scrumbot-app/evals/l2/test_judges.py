@@ -1,7 +1,9 @@
-"""L2 LLM-as-judge evals. @nightly — calls claude-opus-4-7.
+"""L2 LLM-as-judge evals. @nightly — calls Amazon Nova Pro via Bedrock (judge.py).
 
-Note: rubrics below are starting points. Calibrate against real prod traces
-after running scripts/dump_traces.py and reviewing evals/fixtures/raw/.
+Nova Pro is a different model family from the agent under test (claude-sonnet-4-6),
+chosen to avoid self-preference bias. Note: rubrics below are starting points.
+Calibrate against real prod traces after running scripts/dump_traces.py and
+reviewing evals/fixtures/raw/ (see EVALS.md "Prod calibration runbook").
 """
 import pytest
 

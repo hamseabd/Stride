@@ -1,5 +1,6 @@
 """Fixture trace cases for L1 and L2 evals. No real user data — all IDs are fake."""
 from dataclasses import dataclass, field
+from datetime import date, timedelta
 
 TOOL_REQUIRED_ARGS: dict[str, set[str]] = {
     "resolve_date": {"expression"},
@@ -10,10 +11,10 @@ TOOL_REQUIRED_ARGS: dict[str, set[str]] = {
     "list_active_projects": set(),
     "create_task": {"title", "cycle_id"},
     "update_task_status": {"task_id", "status"},
-    "get_cycle_data": {"project_id"},
+    "get_cycle_data": {"cycle_id"},
     "create_checkin": {"user_id", "did", "doing"},
     "flag_blocker": {"task_id", "description"},
-    "get_pace_history": {"user_id"},
+    "get_pace_history": {"project_id"},
     "get_user_patterns": {"user_id"},
     "record_velocity": {"cycle_id", "project_id", "planned_points", "delivered_points", "cycle_name"},
     "update_user_patterns": {"user_id", "delivered_points", "planned_points", "new_blockers"},
@@ -22,7 +23,7 @@ TOOL_REQUIRED_ARGS: dict[str, set[str]] = {
     "create_habit": {"user_id", "title"},
     "complete_habit": {"user_id", "habit_id"},
     "list_habits": {"user_id"},
-    "submit_feedback": {"user_id", "message"},
+    "submit_feedback": {"user_id", "feedback"},
 }
 
 
@@ -119,9 +120,12 @@ WITHIN_BUDGET_CALLS = [{"name": "list_active_projects", "input": {}}] * 5
 OVER_BUDGET_CALLS = [{"name": "list_active_projects", "input": {}}] * 7
 
 # L1.11 — Date fields: valid ISO + not in the past
+# Dates are computed relative to today so this fixture never rots (was hardcoded 2026-06-01).
+_VALID_START = (date.today() + timedelta(days=7)).isoformat()
+_VALID_END = (date.today() + timedelta(days=14)).isoformat()
 VALID_DATE_CALL = {"name": "create_work_cycle", "input": {
     "project_id": SEEDED_PROJECT_ID, "name": "Week 1",
-    "start_date": "2026-06-01", "end_date": "2026-06-07",
+    "start_date": _VALID_START, "end_date": _VALID_END,
 }}
 PAST_DATE_CALL = {"name": "create_work_cycle", "input": {
     "project_id": SEEDED_PROJECT_ID, "name": "Old Week",

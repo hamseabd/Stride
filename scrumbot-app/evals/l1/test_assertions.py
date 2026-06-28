@@ -1,9 +1,17 @@
-"""L1 deterministic assertions. No LLM calls. Must run in <5s."""
+"""L1 deterministic assertions. No LLM calls. Must run in <5s.
+
+Style checks (length, jargon, XL label, multiple questions, empty) delegate to the
+production validator `shared.validators.validate_response` — the same code that runs
+on every live reply. L1 must never re-implement these rules, or the tests would pass
+while production silently drifts. Checks with no production equivalent (PII, tool
+args, hallucinated IDs, onboarding order, tool budget, dates) own their own logic.
+"""
 import re
 from datetime import date
 
 import pytest
 
+from shared.validators import validate_response
 from evals.fixtures.traces import (
     BAD_ONBOARDING_EARLY,
     BAD_ONBOARDING_MISSING_TASK,
@@ -33,67 +41,87 @@ from evals.fixtures.traces import (
     XL_LABEL_RESPONSE,
 )
 
-MAX_SMS_CHARS = 480
-
-_FORBIDDEN_TERMS = re.compile(
-    r"\b(sprint|story points?|standup|stand-up|scrum|backlog|kanban|velocity|retro|retrospective)\b",
-    re.IGNORECASE,
-)
-_SIZE_LABEL_XL = re.compile(r"\bXL\b")
 _PII_PATTERNS = [
     re.compile(r"[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}"),
     re.compile(r"\b\d{3}[-.\s]?\d{3}[-.\s]?\d{4}\b"),
 ]
 
 
-# L1.1 — Response ≤ 480 chars
+# L1.0 — Style checks must reuse the production validator, never a private copy.
+# This guards against re-introducing a divergent regex: if someone redefines the
+# jargon/size rules here, the eval would pass while production silently drifts.
+
+def test_l1_0_style_checks_use_production_validator():
+    import evals.l1.test_assertions as this_module
+    import shared.validators as prod
+
+    assert this_module.validate_response is prod.validate_response, (
+        "L1 style checks must call shared.validators.validate_response, not a local copy"
+    )
+    assert not hasattr(this_module, "_FORBIDDEN_TERMS"), (
+        "L1 must not define its own jargon regex — it drifts from production"
+    )
+    assert not hasattr(this_module, "_SIZE_LABEL_XL"), (
+        "L1 must not define its own XL regex — it drifts from production"
+    )
+
+
+# L1.1–L1.5 delegate to the production validator so the eval and the live SMS path
+# share one implementation. validate_response returns a dict of warnings;
+# empty dict == clean. Each check below asserts on the specific warning key it owns.
+
+def _warnings(trace):
+    return validate_response(trace.response)
+
+
+# L1.1 — Response ≤ 480 chars (production: "length_exceeded")
 
 @pytest.mark.parametrize("trace,expected_pass", [
     (LONG_RESPONSE, False),
     (VALID_RESPONSE, True),
 ])
 def test_l1_1_length(trace, expected_pass):
-    result = len(trace.response) <= MAX_SMS_CHARS
+    result = "length_exceeded" not in _warnings(trace)
     assert result == expected_pass, f"Length {len(trace.response)} chars"
 
 
-# L1.2 — No scrum jargon
+# L1.2 — No scrum jargon (production: "jargon")
 
 @pytest.mark.parametrize("trace,expected_pass", [
     (JARGON_RESPONSE, False),
     (VALID_RESPONSE, True),
 ])
 def test_l1_2_jargon(trace, expected_pass):
-    found = _FORBIDDEN_TERMS.findall(trace.response)
-    result = len(found) == 0
-    assert result == expected_pass, f"Jargon found: {found}"
+    warnings = _warnings(trace)
+    result = "jargon" not in warnings
+    assert result == expected_pass, f"Jargon found: {warnings.get('jargon')}"
 
 
-# L1.3 — No raw XL size label
+# L1.3 — No raw XL size label (production: "size_labels")
 
 @pytest.mark.parametrize("trace,expected_pass", [
     (XL_LABEL_RESPONSE, False),
     (VALID_RESPONSE, True),
 ])
 def test_l1_3_xl_label(trace, expected_pass):
-    found = _SIZE_LABEL_XL.findall(trace.response)
-    result = len(found) == 0
-    assert result == expected_pass, f"XL found: {found}"
+    warnings = _warnings(trace)
+    result = "size_labels" not in warnings
+    assert result == expected_pass, f"XL found: {warnings.get('size_labels')}"
 
 
-# L1.4 — ≤ 1 question mark per response
+# L1.4 — ≤ 1 question mark per response (production: "multiple_questions")
 
 @pytest.mark.parametrize("trace,expected_pass", [
     (MULTI_QUESTION_RESPONSE, False),
     (VALID_RESPONSE, True),
 ])
 def test_l1_4_single_question(trace, expected_pass):
-    count = trace.response.count("?")
-    result = count <= 1
-    assert result == expected_pass, f"Found {count} question marks"
+    warnings = _warnings(trace)
+    result = "multiple_questions" not in warnings
+    assert result == expected_pass, f"Found {warnings.get('multiple_questions')} question marks"
 
 
-# L1.5 — Non-empty response
+# L1.5 — Non-empty response (production: "empty")
 
 @pytest.mark.parametrize("trace,expected_pass", [
     (EMPTY_RESPONSE, False),
@@ -101,11 +129,24 @@ def test_l1_4_single_question(trace, expected_pass):
     (VALID_RESPONSE, True),
 ])
 def test_l1_5_nonempty(trace, expected_pass):
-    result = bool(trace.response and trace.response.strip())
+    result = "empty" not in _warnings(trace)
     assert result == expected_pass
 
 
 # L1.6 — Tool call required args present
+
+
+def _call_has_all_required(call: dict) -> bool:
+    """The L1.6 check: does this tool call supply every required arg?
+
+    Single implementation of the check so test_l1_6 (hand-picked cases) and
+    test_l1_6b (every tool) exercise the *same* logic — a regression here is
+    caught by both, not silently passed by a tautological coverage test.
+    """
+    required = TOOL_REQUIRED_ARGS.get(call["name"], set())
+    present = set(call["input"].keys())
+    return not (required - present)
+
 
 @pytest.mark.parametrize("call,expected_pass", [
     (VALID_TOOL_CALL, True),
@@ -113,11 +154,7 @@ def test_l1_5_nonempty(trace, expected_pass):
     (UNKNOWN_TOOL_CALL, True),  # unknown tools: no required args to check
 ])
 def test_l1_6_tool_args(call, expected_pass):
-    required = TOOL_REQUIRED_ARGS.get(call["name"], set())
-    present = set(call["input"].keys())
-    missing = required - present
-    result = len(missing) == 0
-    assert result == expected_pass, f"Missing args: {missing}"
+    assert _call_has_all_required(call) == expected_pass
 
 
 # L1.7 — Tool arg UUIDs exist in seeded fixture state (hallucination check)
@@ -127,7 +164,7 @@ UUID_ARG_KEYS = {"project_id", "cycle_id", "task_id", "habit_id"}
 
 
 @pytest.mark.parametrize("call,expected_pass", [
-    ({"name": "get_cycle_data", "input": {"project_id": SEEDED_PROJECT_ID}}, True),
+    ({"name": "get_cycle_data", "input": {"cycle_id": SEEDED_CYCLE_ID}}, True),
     ({"name": "update_task_status", "input": {"task_id": HALLUCINATED_TASK_ID, "status": "done"}}, False),
 ])
 def test_l1_7_no_hallucinated_ids(call, expected_pass):
@@ -136,6 +173,62 @@ def test_l1_7_no_hallucinated_ids(call, expected_pass):
             assert not expected_pass, f"Hallucinated ID: {key}={val}"
             return
     assert expected_pass
+
+
+# L1.6a — Anti-drift guard: every arg named in TOOL_REQUIRED_ARGS must be a real
+# parameter of the live @tool. Without this, the hand-maintained required-args dict
+# silently rots away from shared/tools.py — exactly how get_cycle_data/get_pace_history/
+# submit_feedback drifted (project_id/user_id/message were never real params). This is
+# the L1.0-equivalent for the tool table: it makes that class of drift impossible.
+
+def _tool_params(name: str) -> set[str]:
+    import inspect
+    import shared.tools as tools_module
+    fn = getattr(tools_module, name)
+    # Strands @tool wraps the function; the original is on __wrapped__.
+    fn = getattr(fn, "__wrapped__", fn)
+    return set(inspect.signature(fn).parameters)
+
+
+@pytest.mark.parametrize("name", sorted(TOOL_REQUIRED_ARGS))
+def test_l1_6a_required_args_are_real_params(name):
+    required = TOOL_REQUIRED_ARGS[name]
+    params = _tool_params(name)
+    drift = required - params
+    assert not drift, (
+        f"TOOL_REQUIRED_ARGS['{name}'] names {drift} which are not parameters of "
+        f"shared.tools.{name} (real params: {sorted(params)}). The dict has drifted "
+        f"from the live signature — fix one or the other."
+    )
+
+
+# L1.6b — Coverage: every tool in TOOL_REQUIRED_ARGS is run through the *real* L1.6
+# check (_call_has_all_required), not just the 2-3 hand-picked cases. A call with all
+# required args present must pass; a call missing one required arg must fail. Iterating
+# the dict means a newly added tool is covered automatically. Because these route through
+# the same check as test_l1_6, a regression in that check fails here too.
+
+def _all_present_call(name: str) -> dict:
+    return {"name": name, "input": {arg: "x" for arg in TOOL_REQUIRED_ARGS[name]}}
+
+
+@pytest.mark.parametrize("name", sorted(TOOL_REQUIRED_ARGS))
+def test_l1_6b_all_required_present_passes(name):
+    assert _call_has_all_required(_all_present_call(name)), (
+        f"{name}: all required args supplied but L1.6 check reported missing"
+    )
+
+
+@pytest.mark.parametrize(
+    "name", sorted(n for n in TOOL_REQUIRED_ARGS if TOOL_REQUIRED_ARGS[n])
+)
+def test_l1_6b_missing_one_required_fails(name):
+    required = TOOL_REQUIRED_ARGS[name]
+    dropped = sorted(required)[0]
+    call = {"name": name, "input": {arg: "x" for arg in required if arg != dropped}}
+    assert not _call_has_all_required(call), (
+        f"{name}: dropped required arg {dropped!r} but L1.6 check still passed"
+    )
 
 
 # L1.8 — No PII in response (email, US phone)

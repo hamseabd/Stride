@@ -3,6 +3,9 @@ on:
   schedule:
     - cron: "0 6 * * *"
   workflow_dispatch:
+permissions:
+  id-token: write   # required for OIDC (Bedrock access for the L2 judge)
+  contents: read
 jobs:
   l2-evals:
     runs-on: ubuntu-latest
@@ -13,9 +16,14 @@ jobs:
       - run: cd scrumbot-app && pip install -r requirements.txt -r requirements-dev.txt
       - name: L1 + regression
         run: cd scrumbot-app && python -m pytest evals/l1/test_assertions.py evals/regression/ -v -m "not integration"
+      # L2 judge runs on Amazon Nova Pro via Bedrock — assume the AWS role (OIDC,
+      # no long-lived keys) so boto3 resolves Bedrock credentials from the chain.
+      - name: Configure AWS credentials (Bedrock)
+        uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: us-east-1
       - name: L2 judges
-        env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: cd scrumbot-app && python -m pytest evals/l2/ -v -s -m nightly
       - name: Classifier recall
         env:

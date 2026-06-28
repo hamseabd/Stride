@@ -16,8 +16,10 @@ test:
 eval-l1:
 	cd scrumbot-app && .venv/bin/python -m pytest evals/l1/test_assertions.py evals/regression/ -v --tb=short -m "not integration"
 
+# L2 judge runs on Amazon Nova Pro via Bedrock — needs AWS creds + Bedrock model
+# access (resolved from the standard boto3 credential chain), not an Anthropic key.
 eval-l2:
-	cd scrumbot-app && ANTHROPIC_API_KEY=$(ANTHROPIC_API_KEY) .venv/bin/python -m pytest evals/l2/ -v -s -m nightly
+	cd scrumbot-app && .venv/bin/python -m pytest evals/l2/ -v -s -m nightly
 
 eval-classifier:
 	cd scrumbot-app && ANTHROPIC_API_KEY=$(ANTHROPIC_API_KEY) .venv/bin/python -m pytest evals/l1/test_classifier.py -v -m integration

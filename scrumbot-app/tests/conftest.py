@@ -1,6 +1,14 @@
 import pytest
 import boto3
 from moto import mock_aws
+from datetime import date, timedelta
+
+from testsupport import create_stride_table
+
+# Relative dates so fixtures never rot (create_project/create_work_cycle reject past dates).
+_FUTURE_TARGET = (date.today() + timedelta(days=30)).isoformat()
+_CYCLE_START = (date.today() + timedelta(days=1)).isoformat()
+_CYCLE_END = (date.today() + timedelta(days=7)).isoformat()
 
 
 @pytest.fixture(autouse=True)
@@ -21,28 +29,7 @@ def ddb():
     shared.db._table = None  # reset singleton so moto's mock is picked up
     with mock_aws():
         client = boto3.client("dynamodb", region_name="us-east-1")
-        client.create_table(
-            TableName="stride-test",
-            KeySchema=[
-                {"AttributeName": "pk", "KeyType": "HASH"},
-                {"AttributeName": "sk", "KeyType": "RANGE"},
-            ],
-            AttributeDefinitions=[
-                {"AttributeName": "pk", "AttributeType": "S"},
-                {"AttributeName": "sk", "AttributeType": "S"},
-                {"AttributeName": "gsi1pk", "AttributeType": "S"},
-                {"AttributeName": "gsi1sk", "AttributeType": "S"},
-            ],
-            GlobalSecondaryIndexes=[{
-                "IndexName": "gsi1",
-                "KeySchema": [
-                    {"AttributeName": "gsi1pk", "KeyType": "HASH"},
-                    {"AttributeName": "gsi1sk", "KeyType": "RANGE"},
-                ],
-                "Projection": {"ProjectionType": "ALL"},
-            }],
-            BillingMode="PAY_PER_REQUEST",
-        )
+        create_stride_table(client)
         yield boto3.resource("dynamodb", region_name="us-east-1").Table("stride-test")
 
 
@@ -64,7 +51,7 @@ def seeded_user(ddb, user_id):
 def seeded_project(seeded_user):
     """Create a user + project, return (user_id, project_id)."""
     from shared.tools import create_project
-    result = create_project(user_id=seeded_user, name="Portfolio", description="My portfolio site", target_date="2026-06-01")
+    result = create_project(user_id=seeded_user, name="Portfolio", description="My portfolio site", target_date=_FUTURE_TARGET)
     return seeded_user, result["project_id"]
 
 
@@ -75,7 +62,7 @@ def seeded_cycle(seeded_project):
     user_id, project_id = seeded_project
     result = create_work_cycle(
         project_id=project_id, name="Week 1", goal="Design phase",
-        start_date="2026-03-02", end_date="2026-03-08",
+        start_date=_CYCLE_START, end_date=_CYCLE_END,
     )
     return user_id, project_id, result["cycle_id"]
 

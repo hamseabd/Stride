@@ -1,8 +1,8 @@
-# Stride Eval Suite — Claude Code Briefing
+# Stride Eval Suite
 
-This document gives Claude Code everything needed to implement the Stride eval suite.
-Full plan: `../docs/superpowers/plans/2026-05-16-stride-eval-suite.md`
-Full spec: `../study/stride-eval-design.md`
+Reference for the Stride eval suite: what it covers, how to run it, and how the
+levels (L1 deterministic / L2 LLM-as-judge / regression) fit together. The
+original design notes and rollout plans are kept local (not committed).
 
 ---
 
@@ -11,7 +11,7 @@ Full spec: `../study/stride-eval-design.md`
 A two-level eval suite in `evals/` (inside `scrumbot-app/`):
 
 - **L1** — 12 deterministic assertions. No LLM calls. Gates every PR. Runs in `<5s`.
-- **L2** — LLM-as-judge (claude-opus-4-7). Marked `nightly`. Runs on cron.
+- **L2** — LLM-as-judge (Amazon Nova Pro via Bedrock). Marked `nightly`. Runs on cron.
 - **Regression** — BUG-001 and future known bugs. Moto-based, deterministic.
 - **CI** — Two GitHub Actions workflows: `evals-l1.yml` (every PR) + `evals-l2.yml` (nightly).
 
@@ -35,7 +35,7 @@ scrumbot-app/                        ← you are here
 │   │   └── test_classifier.py       # L1.12 — classifier recall, @pytest.mark.integration
 │   ├── l2/
 │   │   ├── __init__.py
-│   │   ├── judge.py                 # run_judge() — critique-then-verdict via claude-opus-4-7
+│   │   ├── judge.py                 # run_judge() — critique-then-verdict via Amazon Nova Pro (Bedrock)
 │   │   └── test_judges.py           # L2.1 tool selection + L2.2 coaching tone, @pytest.mark.nightly
 │   └── regression/
 │       ├── __init__.py
@@ -58,11 +58,11 @@ scrumbot-app/                        ← you are here
 
 **L1 tests run against fixture data — not the live agent.** Pre-built response strings and tool_call dicts are the test inputs. $0 cost, sub-5s runtime.
 
-**L2 tests are marked `nightly`.** They call `claude-opus-4-7`. Excluded from PR CI via `-m "not nightly"`.
+**L2 tests are marked `nightly`.** They call Amazon Nova Pro via Bedrock — a different model family from the agent (`claude-sonnet-4-6`) to avoid self-preference bias. Excluded from PR CI via `-m "not nightly"`.
 
 **L1.12 (classifier recall) is marked `integration`.** Calls Haiku (~$0.04/run). Excluded from PR CI via `-m "not integration"`. Runs in nightly CI with `ANTHROPIC_API_KEY`.
 
-**`judge.py` uses raw Anthropic SDK** (not Strands) — single completion call, no tools needed. This is the one place in this repo where raw SDK is acceptable (evals are not production code).
+**`judge.py` uses boto3 Bedrock `converse`** (Amazon Nova Pro), not Strands and not the Anthropic SDK — a single completion call, no tools needed. Bedrock is an eval-layer carve-out from hard-constraint #3 ("never Bedrock"): evals are not production code, and the production agent + classifier stay on the Anthropic API direct.
 
 **Regression tests reuse the moto pattern** from `tests/conftest.py` — same DynamoDB mock setup.
 
@@ -77,7 +77,7 @@ scrumbot-app/                        ← you are here
 | L1.3 | No raw "XL" size label leaked to user | `shared/validators.py:25` |
 | L1.4 | ≤ 1 question mark per response | `shared/validators.py:65` |
 | L1.5 | Response is non-empty | `shared/validators.py:37` |
-| L1.6 | Tool call inputs have all required args | `shared/tools.py` (21 tools) |
+| L1.6 | Tool call inputs have all required args (all 21 tools; L1.6a anti-drift guard) | `shared/tools.py` (21 tools) |
 | L1.7 | UUIDs in tool args exist in seeded fixture state | hallucinated IDs |
 | L1.8 | Response contains no PII (email, phone, address) | defensive |
 | L1.9 | `complete_onboarding` fires after project+cycle+task | state machine |
@@ -99,20 +99,25 @@ TOOL_REQUIRED_ARGS: dict[str, set[str]] = {
     "list_active_projects": set(),
     "create_task": {"title", "cycle_id"},
     "update_task_status": {"task_id", "status"},
-    "get_cycle_data": {"project_id"},
+    "get_cycle_data": {"cycle_id"},
     "create_checkin": {"user_id", "did", "doing"},
     "flag_blocker": {"task_id", "description"},
-    "get_pace_history": {"user_id"},
+    "get_pace_history": {"project_id"},
     "get_user_patterns": {"user_id"},
-    "record_velocity": {"cycle_id", "project_id"},
-    "update_user_patterns": {"user_id"},
+    "record_velocity": {"cycle_id", "project_id", "planned_points", "delivered_points", "cycle_name"},
+    "update_user_patterns": {"user_id", "delivered_points", "planned_points", "new_blockers"},
     "complete_onboarding": {"user_id"},
     "set_user_preference": {"user_id", "preference", "value"},
     "create_habit": {"user_id", "title"},
     "complete_habit": {"user_id", "habit_id"},
     "list_habits": {"user_id"},
-    "submit_feedback": {"user_id", "message"},
+    "submit_feedback": {"user_id", "feedback"},
 }
+
+> The required-arg sets above must stay a subset of each tool's real parameters in
+> `shared/tools.py`. `evals/l1/test_assertions.py::test_l1_6a_required_args_are_real_params`
+> enforces this by introspecting the live `@tool` signatures — so this table cannot
+> silently drift again.
 ```
 
 ---
@@ -123,11 +128,14 @@ TOOL_REQUIRED_ARGS: dict[str, set[str]] = {
 
 **Test:**
 1. Seed `PATTERN#AGGREGATE` with `preferred_tone="direct"`
-2. Create project + work cycle + task (use future dates: `start_date="2026-06-01"`, `end_date="2026-06-07"`)
+2. Create project + work cycle + task (use **relative** future dates — `date.today() + timedelta(...)` — never hardcoded ISO strings)
 3. Call `record_velocity()` then `update_user_patterns(user_id)`
 4. Assert `preferred_tone` is still `"direct"` on the `PATTERN#AGGREGATE` record
 
-**Use future dates for work cycle** — past dates may fail `create_work_cycle` validation.
+**Use relative future dates for the work cycle** — past dates fail `create_work_cycle`
+validation. Hardcoded dates (e.g. `2026-06-01`) rot into the past as the calendar moves;
+both the L1.11 fixtures and the regression seeds compute dates from `date.today()` for
+exactly this reason.
 
 ---
 
@@ -151,9 +159,12 @@ def run_judge(system_prompt: str, case: dict) -> dict:
     """
 ```
 
-- Model: `claude-opus-4-7`
+- Model: `us.amazon.nova-pro-v1:0` (cross-region inference profile — the bare
+  `amazon.nova-pro-v1:0` ID can't be invoked on-demand) via Bedrock `converse`
+  (override with `BEDROCK_JUDGE_MODEL_ID`)
 - Judge writes critique first, then ends with `VERDICT: PASS` or `VERDICT: FAIL`
-- Falls back to scanning raw output; defaults to `"fail"` if neither found
+- Verdict is read from the `VERDICT:` line; defaults to `"fail"` if absent or the
+  response has no text block (fail-closed)
 
 ---
 
@@ -176,8 +187,8 @@ markers =
 eval-l1:
 	cd scrumbot-app && .venv/bin/python -m pytest evals/l1/test_assertions.py evals/regression/ -v --tb=short -m "not integration"
 
-eval-l2:
-	cd scrumbot-app && ANTHROPIC_API_KEY=$(ANTHROPIC_API_KEY) .venv/bin/python -m pytest evals/l2/ -v -s -m nightly
+eval-l2:  # Nova Pro via Bedrock — uses AWS creds from the boto3 chain, no Anthropic key
+	cd scrumbot-app && .venv/bin/python -m pytest evals/l2/ -v -s -m nightly
 
 eval-classifier:
 	cd scrumbot-app && ANTHROPIC_API_KEY=$(ANTHROPIC_API_KEY) .venv/bin/python -m pytest evals/l1/test_classifier.py -v -m integration
@@ -206,13 +217,17 @@ jobs:
       - run: cd scrumbot-app && python -m pytest tests/ -v --tb=short
 ```
 
-**`../.github/workflows/evals-l2.yml`** — nightly cron:
+**`../.github/workflows/evals-l2.yml`** — nightly cron. The L2 judge assumes the AWS
+role via OIDC (Bedrock/Nova Pro); the classifier step keeps the Anthropic key (Haiku):
 ```yaml
 name: Evals — L2 Nightly
 on:
   schedule:
     - cron: "0 6 * * *"
   workflow_dispatch:
+permissions:
+  id-token: write   # OIDC for Bedrock
+  contents: read
 jobs:
   l2-evals:
     runs-on: ubuntu-latest
@@ -222,8 +237,11 @@ jobs:
         with: { python-version: "3.12" }
       - run: cd scrumbot-app && pip install -r requirements.txt -r requirements-dev.txt
       - run: cd scrumbot-app && python -m pytest evals/l1/test_assertions.py evals/regression/ -v -m "not integration"
-      - env: { ANTHROPIC_API_KEY: "${{ secrets.ANTHROPIC_API_KEY }}" }
-        run: cd scrumbot-app && python -m pytest evals/l2/ -v -s -m nightly
+      - uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: us-east-1
+      - run: cd scrumbot-app && python -m pytest evals/l2/ -v -s -m nightly
       - env: { ANTHROPIC_API_KEY: "${{ secrets.ANTHROPIC_API_KEY }}" }
         run: cd scrumbot-app && python -m pytest evals/l1/test_classifier.py -v -m integration
 ```
@@ -236,7 +254,7 @@ jobs:
 # L1 only (no API key needed, <5s)
 make eval-l1
 
-# L2 judges (needs ANTHROPIC_API_KEY, calls claude-opus-4-7)
+# L2 judges (needs AWS creds + Bedrock Nova access, calls us.amazon.nova-pro-v1:0)
 make eval-l2
 
 # Classifier recall (needs ANTHROPIC_API_KEY, calls Haiku, ~$0.04)
@@ -253,9 +271,48 @@ DYNAMODB_TABLE_NAME=stride-prod AWS_REGION=us-east-1 \
 
 ---
 
+## Prod calibration runbook (closing the L2 loop)
+
+The L2 rubrics ship as *starting points*. Before trusting Nova Pro's verdicts you must
+measure its agreement with your own judgment on **real** traces — a weak judge can add
+more error than the self-preference bias it removes. Run this once, then whenever the
+prompt or rubrics change materially.
+
+**Prerequisites:** AWS creds with DynamoDB read on `stride-prod` + Bedrock `InvokeModel`
+on the `us.amazon.nova-pro-v1:0` inference profile **and** its underlying foundation
+model `amazon.nova-pro-v1:0` (us-east-1). Bedrock model access must be enabled in the account.
+
+1. **Pull traces** — `dump_traces.py` writes one JSON per consented user's current
+   conversation to `evals/fixtures/raw/` (gitignored — real data, never commit):
+   ```bash
+   cd scrumbot-app
+   DYNAMODB_TABLE_NAME=stride-prod AWS_REGION=us-east-1 \
+       .venv/bin/python scripts/dump_traces.py --limit 100 --out evals/fixtures/raw/
+   ```
+2. **Hand-label ~20 cases** — read the JSON, pick ~20 (input, response, tool_calls) tuples
+   spanning tool-selection and tone, and write *your own* PASS/FAIL for each. This is the
+   ground truth; do it before looking at any judge output to avoid anchoring.
+3. **Run the judge over the same 20** — feed them through `run_judge()` with the L2
+   rubrics and record its verdict + critique.
+4. **Compute agreement** — judge_verdict == your_label, as a percentage.
+   - **≥ ~90%** → Nova Pro is calibrated; trust the nightly verdicts. Record the baseline
+     pass-rate (how many of your 20 the agent itself passed) in this doc.
+   - **< ~90%** → read the disagreements. If the *rubric* is ambiguous, tighten it and
+     add the disagreeing case as a few-shot example. If Nova Pro *reasons* poorly even on
+     clear cases, that's evidence to escalate to a stronger cross-family judge — and you
+     now have a labeled set to pick the replacement against.
+5. **Promote good cases into fixtures** — turn clear real failures into new L2 cases
+   (with `expected_verdict`) and clear style failures into L1 fixtures, so each real bug
+   becomes a permanent regression guard.
+
+> `evals/fixtures/raw/` holds real user conversations — it is gitignored and must stay
+> that way. Only distilled, anonymized cases move into the committed fixture files.
+
+---
+
 ## Do not break
 
-`make test` runs `tests/` — 233 tests, all passing. The `evals/` folder is separate; `testpaths = tests` in `pytest.ini` means it is NOT picked up by default. Confirm after implementation:
+`make test` runs `tests/` — 261 tests, all passing. The `evals/` folder is separate; `testpaths = tests` in `pytest.ini` means it is NOT picked up by default. Confirm:
 
 ```bash
 cd scrumbot-app && .venv/bin/python -m pytest --collect-only 2>&1 | grep "evals/"
@@ -266,7 +323,9 @@ cd scrumbot-app && .venv/bin/python -m pytest --collect-only 2>&1 | grep "evals/
 
 ## Constraints (from CLAUDE.md)
 
-- Raw Anthropic SDK is acceptable ONLY in `evals/l2/judge.py` and `shared/classifier.py`
+- Raw Anthropic SDK is acceptable ONLY in `shared/classifier.py` (single fast completions).
+  `evals/l2/judge.py` uses boto3 Bedrock (`converse`, Nova Pro) — an eval-layer carve-out
+  from "never Bedrock"; see the judge.py docstring.
 - No DynamoDB Scan — regression tests use `get_item` + `query` only
 - Moto mock pattern: reset `shared.db._table = None` before `with mock_aws():` block
 - Python 3.12 — no syntax from 3.13+

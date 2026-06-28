@@ -199,8 +199,9 @@ class TestProjectTools:
         assert result["target_date"] == ""
 
     def test_create_project_with_date(self, seeded_user):
-        result = create_project(user_id=seeded_user, name="Portfolio", description="", target_date="2026-06-01")
-        assert result["target_date"] == "2026-06-01"
+        future = (date.today() + timedelta(days=30)).isoformat()
+        result = create_project(user_id=seeded_user, name="Portfolio", description="", target_date=future)
+        assert result["target_date"] == future
 
     def test_list_active_projects_empty(self, seeded_user):
         result = list_active_projects(user_id=seeded_user)
@@ -211,7 +212,7 @@ class TestProjectTools:
         result = list_active_projects(user_id=user_id)
         assert len(result["projects"]) == 1
         assert result["projects"][0]["project_id"] == project_id
-        assert result["projects"][0]["target_date"] == "2026-06-01"
+        assert result["projects"][0]["target_date"] >= date.today().isoformat()
 
     def test_update_project_name(self, seeded_project):
         _, project_id = seeded_project
