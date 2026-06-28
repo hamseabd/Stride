@@ -56,6 +56,30 @@ class TestValidateResponse:
         w = validate_response("I'll add that to your backlog items.")
         assert "jargon" in w
 
+    def test_jargon_bare_backlog(self):
+        w = validate_response("Let's look at your backlog.")
+        assert "jargon" in w
+
+    def test_jargon_scrum(self):
+        w = validate_response("This is how a scrum team would plan it.")
+        assert "jargon" in w
+
+    def test_jargon_kanban(self):
+        w = validate_response("Move it across your kanban board.")
+        assert "jargon" in w
+
+    def test_jargon_velocity(self):
+        w = validate_response("Your velocity dropped this week.")
+        assert "jargon" in w
+
+    def test_jargon_retro(self):
+        w = validate_response("Let's run a quick retro on last week.")
+        assert "jargon" in w
+
+    def test_jargon_retrospective(self):
+        w = validate_response("Time for a retrospective.")
+        assert "jargon" in w
+
     def test_no_false_positive_on_story(self):
         """'story' as in narrative should not trigger — but our regex catches it.
         This is an accepted trade-off: better to flag than to miss."""

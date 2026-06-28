@@ -14,9 +14,11 @@ logger = Logger(child=True)
 MAX_SMS_CHARS = 480
 TARGET_SMS_CHARS = 300
 
-# Terms that must never appear in user-facing messages
+# Terms that must never appear in user-facing messages — Stride hides the agile
+# framework entirely, so explicit Scrum vocabulary is a leak.
 _FORBIDDEN_TERMS = re.compile(
     r"\b(sprint|sprints|story|stories|standup|stand-up|fibonacci|scrumbot|"
+    r"scrum|kanban|velocity|backlog|retro|retrospective|"
     r"story\s*points?|velocity\s*points?|backlog\s*items?)\b",
     re.IGNORECASE,
 )
