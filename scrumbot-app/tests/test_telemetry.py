@@ -160,3 +160,28 @@ class TestSpanNesting:
         assert "Stride Agent" in spans, f"got {list(spans)}"
         assert spans["Stride Agent"].parent is not None, "agent span became a root"
         assert spans["Stride Agent"].parent.span_id == spans["stride.sms.turn"].context.span_id
+
+
+class TestBotocoreInstrumentation:
+    def test_instruments_only_once(self, monkeypatch):
+        calls = []
+
+        class _Instrumentor:
+            def instrument(self, **kwargs):
+                calls.append(kwargs)
+
+        monkeypatch.setattr(telemetry, "_botocore_instrumentor", lambda: _Instrumentor())
+        monkeypatch.setattr(telemetry, "_botocore_instrumented", False)
+
+        telemetry._instrument_botocore()
+        telemetry._instrument_botocore()
+
+        assert len(calls) == 1
+
+    def test_instrumentation_failure_is_swallowed(self, monkeypatch):
+        def _boom():
+            raise ImportError("not installed")
+
+        monkeypatch.setattr(telemetry, "_botocore_instrumentor", _boom)
+        monkeypatch.setattr(telemetry, "_botocore_instrumented", False)
+        telemetry._instrument_botocore()  # must not raise

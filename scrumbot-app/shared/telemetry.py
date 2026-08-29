@@ -31,6 +31,7 @@ from opentelemetry.sdk.trace.export import BatchSpanProcessor, SpanExporter
 logger = Logger()
 
 _provider: TracerProvider | None = None
+_botocore_instrumented = False
 
 
 def is_enabled() -> bool:
@@ -44,6 +45,24 @@ def _wrap_exporter(exporter: SpanExporter) -> SpanExporter:
         from shared.otel_braintrust import BraintrustSpanExporter
         return BraintrustSpanExporter(exporter, model_id=os.getenv("OTEL_MODEL_ID"))
     return exporter
+
+
+def _botocore_instrumentor():
+    """Indirection so tests can substitute the instrumentor."""
+    from opentelemetry.instrumentation.botocore import BotocoreInstrumentor
+    return BotocoreInstrumentor()
+
+
+def _instrument_botocore() -> None:
+    """Emit spans for DynamoDB calls. Idempotent; never raises."""
+    global _botocore_instrumented
+    if _botocore_instrumented:
+        return
+    try:
+        _botocore_instrumentor().instrument()
+        _botocore_instrumented = True
+    except Exception:
+        logger.warning("otel_botocore_instrumentation_failed")
 
 
 def _build_provider(service_name: str, exporter: SpanExporter | None = None) -> TracerProvider:
@@ -75,6 +94,7 @@ def init_telemetry(service_name: str) -> None:
         provider = _build_provider(service_name)
         trace.set_tracer_provider(provider)
         _provider = provider
+        _instrument_botocore()
         logger.info("otel_initialized", service_name=service_name)
     except Exception:
         _provider = None
