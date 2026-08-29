@@ -12,11 +12,11 @@ variables, so switching vendors never requires a code change:
 When OTEL_EXPORTER_OTLP_ENDPOINT is unset, every function here is inert and
 no spans are produced.
 
-Why we register the global provider ourselves: Strands' own tracer calls
-trace.set_tracer_provider() too, but that call is latched to the first caller.
-By going first at module import — before any Agent is constructed at request
-time — Strands' provider is discarded and its tracer resolves against ours,
-so its spans inherit our resource attributes and our flush control.
+Call init_telemetry() early in the handler, before constructing any Agent.
+Strands' own tracer calls trace.set_tracer_provider() too, but that call is
+latched to the first caller. By initializing our provider first, Strands'
+provider is discarded and its tracer resolves against ours, so its spans
+inherit our resource attributes and flush control.
 """
 
 import os

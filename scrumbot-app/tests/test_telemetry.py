@@ -26,6 +26,14 @@ class TestDisabledByDefault:
         with telemetry.get_tracer().start_as_current_span("noop") as span:
             span.set_attribute("key", "value")
 
+    def test_init_is_noop_when_already_initialised(self, monkeypatch):
+        """The _provider guard, not just the is_enabled() short-circuit."""
+        monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "https://example.test/otel")
+        sentinel = object()
+        monkeypatch.setattr(telemetry, "_provider", sentinel)
+        telemetry.init_telemetry("stride-sms")
+        assert telemetry._provider is sentinel
+
 
 class TestBuildProvider:
     def test_exports_spans_with_resource_attributes(self, monkeypatch):
