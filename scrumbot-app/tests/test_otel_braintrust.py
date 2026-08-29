@@ -63,6 +63,35 @@ class TestBraintrustRemap:
         out = inner.get_finished_spans()[0].attributes
         assert out["user.id"] == "+15551234567"
         assert "braintrust.input_json" not in out
+        assert "braintrust.output_json" not in out
+        assert "braintrust.metrics" not in out
+
+    def test_span_fields_survive_remapping(self, monkeypatch):
+        """A dropped parent would silently flatten the trace tree — guard it."""
+        monkeypatch.delenv("OTEL_VENDOR", raising=False)
+
+        capture = InMemorySpanExporter()
+        provider = telemetry._build_provider("probe", exporter=capture)
+        tracer = provider.get_tracer("t")
+        with tracer.start_as_current_span("root"):
+            with tracer.start_as_current_span("child") as child:
+                child.set_attribute("gen_ai.usage.prompt_tokens", 7)
+        provider.force_flush()
+
+        finished = {s.name: s for s in capture.get_finished_spans()}
+        original = finished["child"]
+
+        inner = InMemorySpanExporter()
+        BraintrustSpanExporter(inner, model_id="claude-sonnet-4-6").export([original])
+        out = inner.get_finished_spans()[0]
+
+        assert out.name == "child"
+        assert out.parent is not None, "parent was dropped — trace tree would flatten"
+        assert out.parent.span_id == finished["root"].context.span_id
+        assert out.context.span_id == original.context.span_id
+        assert out.start_time == original.start_time
+        assert out.end_time == original.end_time
+        assert out.resource is original.resource
 
 
 class TestVendorGate:
