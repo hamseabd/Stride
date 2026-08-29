@@ -185,3 +185,46 @@ class TestBotocoreInstrumentation:
         monkeypatch.setattr(telemetry, "_botocore_instrumentor", _boom)
         monkeypatch.setattr(telemetry, "_botocore_instrumented", False)
         telemetry._instrument_botocore()  # must not raise
+
+        assert telemetry._botocore_instrumented is False
+
+    def test_flag_stays_false_when_instrument_raises(self, monkeypatch):
+        """A failed attempt must remain retryable."""
+        class Broken:
+            def instrument(self, **kwargs):
+                raise RuntimeError("incompatible botocore internals")
+
+        monkeypatch.setattr(telemetry, "_botocore_instrumentor", lambda: Broken())
+        monkeypatch.setattr(telemetry, "_botocore_instrumented", False)
+
+        telemetry._instrument_botocore()  # must not raise
+
+        assert telemetry._botocore_instrumented is False
+
+    def test_real_instrumentation_coexists_with_moto(self, ddb, user_id):
+        """The actual risk in this task: real botocore patching + moto.
+
+        Uses instrument(tracer_provider=...) rather than init_telemetry() so no
+        global provider is registered and other tests are unaffected.
+        """
+        from opentelemetry.instrumentation.botocore import BotocoreInstrumentor
+        from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
+            InMemorySpanExporter,
+        )
+
+        from shared.db import get_or_create_user
+
+        exporter = InMemorySpanExporter()
+        provider = telemetry._build_provider("probe", exporter=exporter)
+
+        instrumentor = BotocoreInstrumentor()
+        instrumentor.instrument(tracer_provider=provider)
+        try:
+            user = get_or_create_user(user_id=user_id, phone=user_id)
+            assert "error" not in user, f"moto broke under instrumentation: {user}"
+        finally:
+            instrumentor.uninstrument()
+
+        provider.force_flush()
+        names = [s.name for s in exporter.get_finished_spans()]
+        assert names, "instrumentation produced no spans — patching did not take effect"
