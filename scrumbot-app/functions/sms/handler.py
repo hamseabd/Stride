@@ -11,10 +11,12 @@ from twilio.request_validator import RequestValidator
 from twilio.twiml.messaging_response import MessagingResponse
 from strands import Agent
 from strands.models.anthropic import AnthropicModel
+from opentelemetry import trace as otel_trace
 
 from shared.sms import send_sms
 from shared.prompt import STRIDE_SYSTEM_PROMPT, PROMPT_VERSION
 from shared.timezone import infer_timezone_from_phone, TZ_DISPLAY_NAMES
+from shared.telemetry import init_telemetry, get_tracer, flush
 
 
 class _CachedAnthropicModel(AnthropicModel):
@@ -62,6 +64,8 @@ from shared.tools import (
 logger = Logger()
 tracer = Tracer()
 app = APIGatewayHttpResolver()
+
+init_telemetry(os.getenv("POWERTOOLS_SERVICE_NAME", "stride-sms"))
 
 SMS_MAX_CHARS = 1600   # Twilio hard limit (safety net in _twiml)
 
@@ -523,7 +527,15 @@ def _call_agent(user_id: str, message: str, is_new_user: bool, user: dict,
         ]
     })
 
-    agent = Agent(model=model, tools=TOOLS, messages=history)
+    agent = Agent(
+        model=model,
+        tools=TOOLS,
+        messages=history,
+        trace_attributes={
+            "user.id": user_id,
+            "prompt_version": PROMPT_VERSION,
+        },
+    )
 
     t0 = time.monotonic()
     result = agent(message)
@@ -559,6 +571,14 @@ def _call_agent(user_id: str, message: str, is_new_user: bool, user: dict,
                      estimated_cost_usd=round(cost_usd, 6),
                      reply_length=len(reply),
                      is_new_user=is_new_user)
+
+        # Strands never makes its spans ambient, so the current span here is
+        # still our root — see spec §3.
+        _root = otel_trace.get_current_span()
+        _root.set_attribute("estimated_cost_usd", round(cost_usd, 6))
+        _root.set_attribute("reply_length", len(reply))
+        _root.set_attribute("agent.cycles", result.metrics.get_summary().get("total_cycles", 0))
+        _root.set_attribute("is_new_user", is_new_user)
     except Exception:
         logger.warning("Failed to extract agent metrics")
 
@@ -597,6 +617,10 @@ def sms():
     message = body.get("Body", [""])[0].strip()
 
     logger.info("SMS received", user_id=user_id, message_length=len(message))
+
+    _root = otel_trace.get_current_span()
+    _root.set_attribute("user.id", user_id)
+    _root.set_attribute("message.length", len(message))
 
     # 3. Message validation
     msg_check = check_message(message)
@@ -678,11 +702,14 @@ def sms():
 
     # 7. Haiku intent classifier — understands natural language
     try:
-        intent = classify_intent(message)
+        with get_tracer().start_as_current_span("stride.classifier") as _cspan:
+            intent = classify_intent(message)
+            _cspan.set_attribute("intent", intent)
     except Exception:
         logger.exception("classify_intent crashed", user_id=user_id)
         intent = "conversation"
     logger.info("Intent classified", user_id=user_id, intent=intent)
+    otel_trace.get_current_span().set_attribute("intent", intent)
 
     if intent == "feedback":
         store_feedback(user_id, message, source="classifier")
@@ -764,4 +791,10 @@ def sms():
 @logger.inject_lambda_context
 @tracer.capture_lambda_handler
 def handler(event: dict, context: LambdaContext) -> dict:
-    return app.resolve(event, context)
+    # The root span MUST close before flush() runs — flushing inside the `with`
+    # would leave the root span open and unexported.
+    try:
+        with get_tracer().start_as_current_span("stride.sms.turn"):
+            return app.resolve(event, context)
+    finally:
+        flush()
