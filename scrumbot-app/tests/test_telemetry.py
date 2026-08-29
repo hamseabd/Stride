@@ -1,5 +1,10 @@
 """Tests for shared/telemetry.py — OTel setup, inertness, and flush safety."""
 
+import subprocess
+import sys
+import textwrap
+from pathlib import Path
+
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
 from shared import telemetry
@@ -82,3 +87,50 @@ class TestFlush:
         monkeypatch.setattr(telemetry, "_provider", Recording())
         telemetry.flush(timeout_millis=1234)
         assert seen["timeout"] == 1234
+
+
+_APP_ROOT = Path(__file__).resolve().parents[1]
+
+_PROVIDER_OWNERSHIP_PROBE = textwrap.dedent("""
+    import sys
+    # Endpoint must be set or Strands leaves its tracer as None and emits nothing.
+    import os
+    os.environ["OTEL_EXPORTER_OTLP_ENDPOINT"] = "http://127.0.0.1:4318"
+
+    from opentelemetry import trace
+    from opentelemetry.sdk.resources import Resource
+    from opentelemetry.sdk.trace import TracerProvider
+    from opentelemetry.sdk.trace.export import ConsoleSpanExporter, SimpleSpanProcessor
+
+    # We go first.
+    provider = TracerProvider(resource=Resource.create({"service.name": "stride-sms"}))
+    provider.add_span_processor(SimpleSpanProcessor(ConsoleSpanExporter(out=sys.stdout)))
+    trace.set_tracer_provider(provider)
+
+    # Strands initialises second and tries to override.
+    from strands.telemetry.tracer import get_tracer as strands_get_tracer
+    st = strands_get_tracer()
+
+    assert trace.get_tracer_provider() is provider, "Strands replaced the global provider"
+    assert st.tracer_provider is not provider, "expected Strands to build its own orphan provider"
+    assert st.tracer is not None, "Strands tracer did not initialise"
+
+    span = st.start_agent_span(prompt="hi", agent_name="probe-span", model_id="claude-sonnet-4-6")
+    span.end()
+    provider.force_flush()
+""")
+
+
+class TestProviderOwnership:
+    def test_our_provider_wins_and_strands_spans_route_through_it(self):
+        result = subprocess.run(
+            [sys.executable, "-c", _PROVIDER_OWNERSHIP_PROBE],
+            cwd=_APP_ROOT,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        assert result.returncode == 0, f"probe failed:\n{result.stderr}"
+        # The span was created by Strands' tracer but printed by OUR exporter.
+        assert "probe-span" in result.stdout
+        assert '"service.name": "stride-sms"' in result.stdout
