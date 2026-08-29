@@ -5,3 +5,5 @@ aws-lambda-powertools==3.7.0
 python-dotenv==1.0.1
 twilio==9.4.0
 aws-xray-sdk==2.15.0
+opentelemetry-sdk==1.39.1
+opentelemetry-exporter-otlp-proto-http==1.39.1
