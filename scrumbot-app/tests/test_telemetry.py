@@ -134,3 +134,29 @@ class TestProviderOwnership:
         # The span was created by Strands' tracer but printed by OUR exporter.
         assert "probe-span" in result.stdout
         assert '"service.name": "stride-sms"' in result.stdout
+
+
+class TestSpanNesting:
+    def test_strands_agent_span_parents_under_our_root(self):
+        from strands.telemetry.tracer import Tracer as StrandsTracer
+
+        exporter = InMemorySpanExporter()
+        provider = telemetry._build_provider("stride-probe", exporter=exporter)
+
+        # Strands with no endpoint leaves tracer None; point it at our provider
+        # to isolate the parenting mechanic without any network or LLM call.
+        st = StrandsTracer()
+        st.tracer_provider = provider
+        st.tracer = provider.get_tracer("strands")
+
+        with provider.get_tracer("stride").start_as_current_span("stride.sms.turn"):
+            agent_span = st.start_agent_span(
+                prompt="hi", agent_name="Stride Agent", model_id="claude-sonnet-4-6"
+            )
+            agent_span.end()
+        provider.force_flush()
+
+        spans = {s.name: s for s in exporter.get_finished_spans()}
+        assert "Stride Agent" in spans, f"got {list(spans)}"
+        assert spans["Stride Agent"].parent is not None, "agent span became a root"
+        assert spans["Stride Agent"].parent.span_id == spans["stride.sms.turn"].context.span_id
