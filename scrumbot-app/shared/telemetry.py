@@ -38,6 +38,14 @@ def is_enabled() -> bool:
     return bool(os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT"))
 
 
+def _wrap_exporter(exporter: SpanExporter) -> SpanExporter:
+    """Apply vendor-specific attribute mapping when OTEL_VENDOR requests it."""
+    if os.getenv("OTEL_VENDOR", "").lower() == "braintrust":
+        from shared.otel_braintrust import BraintrustSpanExporter
+        return BraintrustSpanExporter(exporter, model_id=os.getenv("OTEL_MODEL_ID"))
+    return exporter
+
+
 def _build_provider(service_name: str, exporter: SpanExporter | None = None) -> TracerProvider:
     """Build a configured TracerProvider WITHOUT registering it globally.
 
@@ -54,7 +62,7 @@ def _build_provider(service_name: str, exporter: SpanExporter | None = None) -> 
         "deployment.environment": os.getenv("ENVIRONMENT", "local"),
     })
     provider = TracerProvider(resource=resource)
-    provider.add_span_processor(BatchSpanProcessor(exporter or OTLPSpanExporter()))
+    provider.add_span_processor(BatchSpanProcessor(_wrap_exporter(exporter or OTLPSpanExporter())))
     return provider
 
 
