@@ -337,3 +337,19 @@ class TestStaticPrefix:
         assert "Stride" in _STATIC_PREFIX
         assert "NEVER" in _STATIC_PREFIX  # estimate hiding rule
         assert "SMS" in _STATIC_PREFIX
+
+
+def test_context_includes_project_and_task_ids(ddb, seeded_task):
+    """Tools take project_id / task_id; the model can only supply them if the context shows them."""
+    from functions.sms.handler import _build_user_context
+    user_id, project_id, cycle_id, task_id = seeded_task
+    ctx = _build_user_context(user_id, {"planning_day": 1, "timezone": "America/New_York"}, is_new_user=False)
+    assert f"(id {project_id})" in ctx
+    assert f"(id {task_id})" in ctx
+
+
+def test_context_tells_model_to_use_listed_ids(ddb, seeded_task):
+    from functions.sms.handler import _build_user_context
+    user_id, *_ = seeded_task
+    ctx = _build_user_context(user_id, {"planning_day": 1, "timezone": "America/New_York"}, is_new_user=False)
+    assert "never guess an id" in ctx

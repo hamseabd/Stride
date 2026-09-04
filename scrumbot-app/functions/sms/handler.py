@@ -405,7 +405,7 @@ def _build_user_context(user_id: str, user: dict, is_new_user: bool,
             lines.append("\nActive goals:")
             for p in active_goals:
                 due = f" (due {p['target_date']})" if p.get("target_date") else ""
-                lines.append(f"- {p['name']}{due}")
+                lines.append(f"- {p['name']} (id {p['project_id']}){due}")
 
                 # Phase plan from description
                 if p.get("description"):
@@ -432,7 +432,7 @@ def _build_user_context(user_id: str, user: dict, is_new_user: bool,
                     for task in cycle_data.get("tasks", []):
                         est = _ESTIMATE_LABELS.get(task.get("estimate_label", ""), "")
                         est_str = f" ({est})" if est else ""
-                        lines.append(f"  - {task.get('title', '?')}{est_str} [{task.get('status', '?')}]")
+                        lines.append(f"  - {task.get('title', '?')}{est_str} [{task.get('status', '?')}] (id {task.get('task_id', '?')})")
 
                 # Velocity history (overall progress toward goal)
                 pace = get_pace_history(project_id=p["project_id"], num_cycles=5)
@@ -447,7 +447,7 @@ def _build_user_context(user_id: str, user: dict, is_new_user: bool,
             for p in backlog_goals:
                 due = f" (due {p['target_date']})" if p.get("target_date") else "(no deadline)"
                 desc = f" — {p['description']}" if p.get("description") else ""
-                lines.append(f"- {p['name']} {due}{desc}")
+                lines.append(f"- {p['name']} (id {p['project_id']}) {due}{desc}")
 
         if not active_goals and not backlog_goals and not is_new_user:
             lines.append("\nNo goals yet.")
@@ -478,6 +478,7 @@ def _build_user_context(user_id: str, user: dict, is_new_user: bool,
     # --- Instruction to avoid redundant tool calls ---
     lines.append("\nThis context is pre-loaded and current. Do NOT call list_active_projects, get_cycle_data,")
     lines.append("get_user_patterns, get_pace_history, or list_habits to re-fetch it. Only call write tools (create_task, etc).")
+    lines.append("Use the ids shown above whenever a tool takes project_id or task_id; never guess an id.")
 
     # --- Session-aware context (proactive message reply detection) ---
     if latest_outbound and latest_outbound.get("message_type"):
