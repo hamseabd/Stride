@@ -26,7 +26,11 @@ ALLOWED_NUMBERS = {"+14049485133"}  # the business line
 
 def _public_files():
     for pattern in PUBLIC_GLOBS:
-        yield from ROOT.glob(pattern)
+        for path in ROOT.glob(pattern):
+            # docs/internal/ is gitignored working notes; it never reaches the public repo.
+            if "internal" in path.relative_to(ROOT).parts:
+                continue
+            yield path
 
 
 @pytest.mark.parametrize("path", sorted(_public_files()), ids=lambda p: str(p.relative_to(ROOT)))
