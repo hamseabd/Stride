@@ -47,7 +47,9 @@ scrumbot-app/
 │   ├── classifier.py       # Intent classification (Haiku) — feedback/remind_me/help/conversation
 │   ├── sms.py              # Twilio Client wrapper — send_sms()
 │   ├── timezone.py         # Area code → IANA timezone inference for onboarding
-│   └── validators.py       # Post-generation response validation (jargon, length, empty)
+│   ├── validators.py       # Post-generation response validation (jargon, length, empty)
+│   ├── telemetry.py        # OpenTelemetry provider setup, tracer, flush (inert unless OTLP endpoint set)
+│   └── otel_braintrust.py  # Optional gen_ai → Braintrust attribute remap (OTEL_VENDOR=braintrust)
 └── tests/
 ```
 
@@ -73,6 +75,10 @@ Always read from environment. Never hardcode. All must be present for local dev:
 | `TWILIO_ACCOUNT_SID` | (optional locally) | Required on stride-sms |
 | `TWILIO_AUTH_TOKEN` | (optional locally) | Required on stride-sms |
 | `TWILIO_PHONE_NUMBER` | (optional locally) | Required on stride-sms (E.164, e.g. +18005551234) |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | (unset — tracing off) | Braintrust `https://api.braintrust.dev/otel` or Dynatrace `https://<env>.live.dynatrace.com/api/v2/otlp` |
+| `OTEL_EXPORTER_OTLP_HEADERS` | (unset) | `Authorization=Bearer <key>, x-bt-parent=project_id:<id>` (Braintrust) or `Authorization=Api-Token <token>` (Dynatrace) |
+| `OTEL_VENDOR` | (unset) | `braintrust` to enable Braintrust attribute remapping |
+| `OTEL_MODEL_ID` | (unset) | `claude-sonnet-4-6` — stamped onto model-invoke spans so Braintrust can price them |
 
 **`AWS_ENDPOINT_URL` handling:**
 ```python
@@ -359,7 +365,15 @@ logger.error("Tool failed", error=str(e), tool="create_task")
 ```
 
 Never: `print()`, `logging.basicConfig()`, `logging.getLogger()`.
-Never log message content (PII). Always log user_id for traceability.
+Never log message content (PII) **via Powertools Logger**. Always log user_id for traceability.
+
+**Deliberate exception — OpenTelemetry spans.** Strands emits `gen_ai.prompt`,
+`gen_ai.completion`, and `tool.parameters` containing full message content, and
+Stride exports them unredacted to the configured OTLP backend. This was an
+explicit owner decision (2026-08-29) to enable conversation-level debugging and
+production-traces-to-evals. It is not a bug — do not add redaction without
+asking. Consequence: the published privacy policy must name the trace vendor as
+a subprocessor before real user traffic is exported.
 
 ---
 
@@ -379,6 +393,13 @@ All telemetry is emitted as structured JSON log events via Powertools Logger. No
 **Prompt versioning:** `PROMPT_VERSION` in `shared/prompt.py`. Bump on every prompt change. Logged as a field in `agent_metrics` for correlation.
 
 **Response validation:** `shared/validators.py` runs after every agent call. Checks jargon, length, size labels, empty. Logs warnings, never blocks the response.
+
+**Distributed tracing (OpenTelemetry):** `shared/telemetry.py` registers the
+global `TracerProvider` at handler import, before any `Agent` is constructed, so
+Strands' spans (agent, event-loop cycle, model invoke, tool) route through our
+exporter. Root span is `stride.sms.turn` / `stride.scheduler.run`. Inert unless
+`OTEL_EXPORTER_OTLP_ENDPOINT` is set. X-Ray remains active in parallel; removing
+it is deferred until OTel is proven in production.
 
 **Analysis:** `make analyze` / `make analyze-cost` / `make analyze-quality` / `make analyze-week` — queries CloudWatch Logs Insights via `scripts/analyze.py`.
 
