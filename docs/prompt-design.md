@@ -6,37 +6,33 @@ Stride's system prompt is divided into three layers that separate static, cachea
 
 The full prompt delivered to Claude consists of three concatenated pieces:
 
-**Layer 1: Persona and capacity language.** `STRIDE_SYSTEM_PROMPT` in `shared/prompt.py` defines who Stride is: a coach who helps people finish multi-week goals via SMS, without jargon. It explains the core sessions (planning day, daily check-ins, weekly reviews), how estimates work internally, and how to redirect users who ask for help outside Stride's scope. This layer is identical for every user and every turn.
+**Layer 1: Persona.** `STRIDE_SYSTEM_PROMPT` in `shared/prompt.py` — who Stride is, core sessions, internal estimates, scope boundaries.
 
-**Layer 2: SMS rules and decomposition language.** `_CAPACITY_LANGUAGE_ADDENDUM` and `_SMS_SYSTEM_ADDENDUM` in `functions/sms/handler.py` specify the technical constraints for SMS: message length tiers (160/320/480 characters), no emojis, no markdown, no internal jargon, one question per message. This layer also describes how to handle goal decomposition, new goals after onboarding, planning day flow, habit tracking, and Friday reviews. Static, identical for all users.
+**Layer 2: SMS rules.** `_CAPACITY_LANGUAGE_ADDENDUM` and `_SMS_SYSTEM_ADDENDUM` in `functions/sms/handler.py` — message length tiers (160/320/480 chars), no emojis/markdown/jargon, one question per message, decomposition flow, planning day, habit tracking.
 
-**Layer 3: Per-user context suffix.** `_build_user_context()` in `functions/sms/handler.py` builds a dynamic suffix containing today's date, the user's timezone, coaching tone preference, name, inferred timezone from their area code (for new users), active and backlog goals, current cycle tasks with estimates, velocity history, habits with streaks, patterns (completion rate, common blockers), and session context if the user is replying to a proactive message within the 6-hour staleness window. This suffix also includes an instruction not to re-fetch any of these data points, since they were pre-loaded before the agent was invoked.
+**Layer 3: Per-user context.** `_build_user_context()` builds dynamic suffix with date, timezone, tone, name, goals, habits, patterns, session context, and instruction not to re-fetch.
 
-**Layer 4 (new users only): Onboarding addendum.** `_ONBOARDING_ADDENDUM` is appended only if `is_new_user=True`. It runs through the adaptive onboarding flow, explains how to handle vague goals and multiple goals at once, and sets expectations for name and timezone collection. Omitted for returning users.
+**Layer 4: Onboarding addendum.** `_ONBOARDING_ADDENDUM` (new users only) — adaptive flow, handling vague goals, name/timezone collection.
 
 Layers 1 and 2 are cached together with `cache_control: ephemeral`. Layer 3 is dynamic and not cached. Layer 4 is appended only once per user lifecycle.
 
 ## Why the split
 
-[ADR-0008](adr/0008-prompt-layering-for-cache-stability.md) documents this design. By keeping persona and rules in an immutable static prefix, Stride reuses 73 % of prompt tokens across all users and turns during the beta (46 coached turns, average 5,602 cache-read tokens per turn vs. 2,054 fresh input tokens). This cache ratio is only possible because the prefix never interpolates user_id, project names, dates, or any variable data.
-
-Cache savings offset the cost of Haiku classification (the fast intent router) and make the 14 daily scheduler runs across 6 users nearly free. Without caching, the same volume would cost 10x as much.
+[ADR-0008](adr/0008-prompt-layering-for-cache-stability.md) documents this design. Layers 1–2 form a static, cacheable prefix that never changes across users or turns. By separating static from dynamic, Stride achieves 73 % cache reuse (46 coached turns, avg 5,602 cache-read tokens vs. 2,054 fresh tokens). Cache savings offset Haiku classification costs and make the scheduler nearly free; without caching, the beta volume would cost 10x as much.
 
 ## What the user context contains
 
 The per-user suffix built by `_build_user_context()` includes:
 
 - Today's ISO date
-- User's timezone (stored preference, or inferred from phone area code for new users)
-- User's name (if set)
-- User's coaching tone preference (balanced, direct, or encouraging)
-- Inferred timezone from the user's phone area code (new users only, for confirmation)
-- **Active goals:** projects with active cycles, deadlines, days remaining, phase plans, current cycle tasks with human-readable time estimates, and velocity history (weeks completed, tasks delivered vs. planned)
-- **Backlog goals:** projects without active cycles, awaiting planning
-- **Habits:** title, frequency, current streak, done-today status
-- **Patterns:** completion rate as percentage, common blockers (if 3+ weeks of data), low-completion-rate flag (if <60% and 3+ weeks of history)
-- **Session context:** if the user is replying to a proactive message within 6 hours, the type of message (morning check-in, Friday review, etc.) is noted so the agent can respond in context
-- **Instruction to not re-fetch:** an explicit note that all data was pre-loaded and the agent must not call list_active_projects, get_cycle_data, get_user_patterns, get_pace_history, or list_habits
+- User's timezone (stored, or inferred from area code for new users)
+- User's name and coaching tone preference (balanced, direct, encouraging)
+- Active goals (with cycles, deadlines, days remaining, tasks, velocity history)
+- Backlog goals (saved but not yet planned)
+- Habits (title, frequency, current streak, done-today status)
+- Patterns (completion rate, common blockers if 3+ weeks of data)
+- Session context (if replying to proactive message within 6 hours, what type)
+- Instruction not to re-fetch (pre-loaded; don't call list_active_projects, get_cycle_data, etc.)
 
 ## Length and style rules
 
@@ -66,11 +62,11 @@ Never expose internal IDs, error messages, or technical details.
 If you need to share more, give the key point and ask if they want detail.
 ```
 
-The validator in `shared/validators.py` logs warnings (but never blocks) if a response exceeds 480 chars, contains scrum jargon, leaks size labels like "XL", or contains more than one question mark. These are advisory; the response is still sent.
+The validator in `shared/validators.py` logs warnings (but never blocks) for length, jargon, size-label leaks, or multiple questions.
 
 ## Versioning
 
-`PROMPT_VERSION` in `shared/prompt.py` is set to `v2.0` and bumped whenever the system prompt changes materially. Every agent invocation logs `agent_metrics` with the prompt version, `input_tokens`, `output_tokens`, `cache_read_tokens`, and `cache_write_tokens`. This allows any turn to be correlated with the exact prompt that produced it, essential for auditing cache behavior and performance changes across prompt iterations.
+`PROMPT_VERSION` in `shared/prompt.py` is `v2.0` and is bumped on material changes. Every agent invocation logs `agent_metrics` with version and token counts, allowing any turn to be correlated with its exact prompt.
 
 ## What the evals check
 
@@ -88,8 +84,6 @@ The validator in `shared/validators.py` logs warnings (but never blocks) if a re
 - L1.11: Date fields are valid ISO and not in the past
 - L1.12: Classifier recall ≥ 0.95 per intent across 40 labeled pairs
 
-**L2 cross-family judge** (nightly cron, Amazon Nova Pro via Bedrock):
-- L2.1: Tool selection is correct and necessary (does the agent call the right tools with the right arguments?)
-- L2.2: Coaching tone matches user preference and session context (is the response empathetic, direct, or encouraging as appropriate?)
-
-The L2 judge runs on a separate model family (Amazon Nova Pro, not Claude) to avoid self-preference bias and to calibrate against real user conversations from production.
+**L2 cross-family judge** (nightly, Amazon Nova Pro via Bedrock — separate model family to avoid self-preference bias):
+- L2.1: Tool selection correctness
+- L2.2: Coaching tone alignment with user preference and context
