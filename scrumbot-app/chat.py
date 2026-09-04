@@ -214,7 +214,8 @@ def run_turn(phone: str, message: str) -> dict:
         {"type": "text", "text": _STATIC_PREFIX, "cache_control": {"type": "ephemeral"}},
         {"type": "text", "text": _build_user_context(phone, user, is_new)},
     ]})
-    agent = Agent(model=model, tools=TOOLS, messages=history)
+    # Tools run in the calling thread so tenant binding reaches them (BUG-004).
+    agent = Agent(model=model, tools=TOOLS, messages=history, max_parallel_tools=1)
 
     with bind_user(phone):
         result = agent(message)

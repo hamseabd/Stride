@@ -38,3 +38,13 @@ def test_nested_bind_restores_outer():
         with bind_user("+15550000002"):
             assert bound_user() == "+15550000002"
         assert bound_user() == "+15550000001"
+
+
+def test_binding_does_not_cross_thread_pool_boundary():
+    """Strands' default tool executor runs tools on worker threads, where a ContextVar
+    set in the request thread is invisible. Pins why _call_agent forces sequential tools."""
+    from concurrent.futures import ThreadPoolExecutor
+    with bind_user("+15550000001"):
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            seen = pool.submit(bound_user).result()
+    assert seen is None

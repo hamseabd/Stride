@@ -126,6 +126,9 @@ class TestAgentTraceAttributes:
         attrs = captured["trace_attributes"]
         assert attrs["user.id"] == seeded_user
         assert attrs["prompt_version"] == PROMPT_VERSION
+        # Tools must run in the calling thread: the tenant ContextVar and the OTel span
+        # context do not cross Strands' default thread pool (BUG-004).
+        assert captured["max_parallel_tools"] == 1
 
     def test_cost_attributes_land_on_the_root_span(self, monkeypatch, ddb, seeded_user):
         """Proves the spec §3 claim: Strands never makes its spans ambient, so

@@ -537,6 +537,9 @@ def _call_agent(user_id: str, message: str, is_new_user: bool, user: dict,
             "user.id": user_id,
             "prompt_version": PROMPT_VERSION,
         },
+        # Tools run in the calling thread: the tenant ContextVar (shared/tenant.py) and the
+        # OpenTelemetry span context do not cross Strands' default thread pool (BUG-004).
+        max_parallel_tools=1,
     )
 
     t0 = time.monotonic()

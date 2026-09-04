@@ -148,3 +148,43 @@ def test_bug_003_context_exposes_ids_the_tools_need(ddb):
     ctx = _build_user_context(user_id, {"planning_day": 1, "timezone": "America/New_York"}, is_new_user=False)
     assert f"(id {project_id})" in ctx, "BUG-003 regression: project id missing from context"
     assert f"(id {task_id})" in ctx, "BUG-003 regression: task id missing from context"
+
+
+def test_bug_004_tools_run_in_the_calling_thread(monkeypatch, ddb):
+    """
+    BUG-004: BUG-002's tenant binding is a ContextVar; Strands ran tools on a thread pool
+    where it is invisible, so tools still trusted the model's user_id in Lambda.
+    Fixed 2026-09 (v2.3): the Agent is built with max_parallel_tools=1.
+    """
+    from functions.sms import handler as sms_handler
+
+    captured = {}
+
+    class _Result:
+        class metrics:
+            accumulated_usage = {"inputTokens": 1, "outputTokens": 1, "totalTokens": 2}
+
+            @staticmethod
+            def get_summary():
+                return {"total_cycles": 1}
+
+        def __str__(self):
+            return "ok"
+
+    class _FakeAgent:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+            self.messages = []
+
+        def __call__(self, message):
+            return _Result()
+
+    user_id = "+15550000041"
+    _seed_user(ddb, user_id)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test")
+    monkeypatch.setattr(sms_handler, "Agent", _FakeAgent)
+    monkeypatch.setattr(sms_handler, "save_conversation", lambda *a, **k: None)
+    monkeypatch.setattr(sms_handler, "get_conversation", lambda uid: [])
+    sms_handler._call_agent(user_id=user_id, message="hi", is_new_user=False,
+                            user={"planning_day": 1, "timezone": "America/New_York"})
+    assert captured.get("max_parallel_tools") == 1, "BUG-004 regression: tools would run on worker threads"
