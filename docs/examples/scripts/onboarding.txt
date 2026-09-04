@@ -1,0 +1,6 @@
+# Indie developer, first session. One line per user text.
+Hey, I'm Jordan. I'm building a Chrome extension that blocks distracting sites. I want it on the Web Store in six weeks.
+This week I want to finish the blocklist UI and get the options page working. A day or two each I think.
+Actually the options page turned out bigger than expected — most of the week for that one. I'm still stuck on the manifest v3 permissions on it.
+That plan works. Let's go.
+Did the blocklist UI today. Tomorrow I'm on the options page. Still stuck on the permissions thing.
