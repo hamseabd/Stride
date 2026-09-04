@@ -98,3 +98,27 @@ def test_bug_001_boundary_new_user_defaults_to_balanced(ddb):
     assert item.get("preferred_tone") == "balanced", (
         f"new user should default to 'balanced', got {item.get('preferred_tone')!r}"
     )
+
+
+def test_bug_002_tool_ignores_model_supplied_user_id(ddb):
+    """
+    BUG-002: tools trusted the user_id the model passed. The handler only told
+    the model the current id in the system prompt, so an injected SMS could
+    point the agent at another user's records. Fixed 2026-09 by binding the
+    authenticated user server-side; tools act on the bound id.
+    """
+    from shared.tenant import bind_user
+    from shared.tools import create_project, list_active_projects
+
+    victim = "+15550000021"
+    attacker = "+15550000022"
+    _seed_user(ddb, victim)
+    _seed_user(ddb, attacker)
+
+    with bind_user(attacker):
+        create_project(user_id=victim, name="Planted", description="", target_date="")
+
+    assert list_active_projects(user_id=victim)["projects"] == [], (
+        "BUG-002 regression: a project was written under a user the model named, not the bound user"
+    )
+    assert [p["name"] for p in list_active_projects(user_id=attacker)["projects"]] == ["Planted"]

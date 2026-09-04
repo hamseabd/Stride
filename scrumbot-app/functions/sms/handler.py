@@ -17,6 +17,7 @@ from shared.sms import send_sms
 from shared.prompt import STRIDE_SYSTEM_PROMPT, PROMPT_VERSION
 from shared.timezone import infer_timezone_from_phone, TZ_DISPLAY_NAMES
 from shared.telemetry import init_telemetry, get_tracer, flush
+from shared.tenant import bind_user
 
 
 class _CachedAnthropicModel(AnthropicModel):
@@ -538,7 +539,10 @@ def _call_agent(user_id: str, message: str, is_new_user: bool, user: dict,
     )
 
     t0 = time.monotonic()
-    result = agent(message)
+    # Constraint: tools act on the authenticated user, never on an id the model
+    # produced. See shared/tenant.py and docs/adr/0012.
+    with bind_user(user_id):
+        result = agent(message)
     agent_duration_ms = round((time.monotonic() - t0) * 1000)
 
     save_conversation(user_id, agent.messages, planning_day=planning_day, user_timezone=tz)

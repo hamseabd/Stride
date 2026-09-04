@@ -158,3 +158,29 @@ class TestAgentTraceAttributes:
         assert span.attributes["is_new_user"] is False
         # (100*3 + 50*15) / 1e6 = 0.00105
         assert span.attributes["estimated_cost_usd"] == pytest.approx(0.00105)
+
+    def test_agent_turn_runs_with_user_bound(self, monkeypatch, ddb, seeded_user):
+        """Tools called during the turn must see the authenticated user as bound."""
+        from shared.tenant import bound_user
+
+        seen = {}
+
+        class _RecordingAgent:
+            def __init__(self, **kwargs):
+                self.messages = []
+
+            def __call__(self, message):
+                seen["bound"] = bound_user()
+                return _make_result()
+
+        monkeypatch.setattr(sms_handler, "Agent", _RecordingAgent)
+        monkeypatch.setattr(sms_handler, "save_conversation", lambda *a, **k: None)
+        monkeypatch.setattr(sms_handler, "get_conversation", lambda uid: [])
+
+        sms_handler._call_agent(
+            user_id=seeded_user, message="hi", is_new_user=False,
+            user={"planning_day": 1, "timezone": "America/New_York"},
+        )
+
+        assert seen["bound"] == seeded_user
+        assert bound_user() is None  # binding does not leak past the turn
