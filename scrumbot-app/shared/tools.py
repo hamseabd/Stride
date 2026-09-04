@@ -8,6 +8,7 @@ from aws_lambda_powertools import Logger
 
 from shared.db import get_table, set_onboarded
 from shared.models import Project, WorkCycle, Task, Checkin, Blocker, Velocity, UserPattern, Habit
+from shared.tenant import enforce_user
 
 logger = Logger()
 
@@ -172,6 +173,7 @@ def create_project(user_id: str, name: str, description: str, target_date: str =
     Returns on error:
       {"error": str}
     """
+    user_id = enforce_user(user_id)
     try:
         if not user_id or not name:
             return {"error": "user_id and name are required"}
@@ -412,6 +414,7 @@ def list_active_projects(user_id: str) -> dict:
     Returns on error:
       {"error": str}
     """
+    user_id = enforce_user(user_id)
     try:
         table = get_table()
 
@@ -635,6 +638,7 @@ def create_checkin(user_id: str, did: str, doing: str, blocked: str) -> dict:
     Returns on error:
       {"error": str}
     """
+    user_id = enforce_user(user_id)
     try:
         checkin = Checkin(user_id=user_id, did=did, doing=doing, blocked=blocked)
         item = checkin.model_dump()
@@ -868,6 +872,7 @@ def update_user_patterns(
     Returns on error:
       {"error": str}
     """
+    user_id = enforce_user(user_id)
     try:
         if not user_id:
             return {"error": "user_id is required"}
@@ -934,6 +939,7 @@ def complete_onboarding(user_id: str) -> dict:
     Returns on error:
       {"error": str}
     """
+    user_id = enforce_user(user_id)
     try:
         if not user_id:
             return {"error": "user_id is required"}
@@ -967,6 +973,7 @@ def submit_feedback(user_id: str, feedback: str) -> dict:
     Returns on error:
       {"error": str}
     """
+    user_id = enforce_user(user_id)
     try:
         from shared.db import store_feedback
         store_feedback(user_id, feedback, source="agent")
@@ -997,6 +1004,7 @@ def get_user_patterns(user_id: str) -> dict:
     Returns on error:
       {"error": str}
     """
+    user_id = enforce_user(user_id)
     try:
         table = get_table()
         resp = table.get_item(
@@ -1056,6 +1064,7 @@ def set_user_preference(user_id: str, preference: str, value: str) -> dict:
     Returns on error:
       {"error": str}
     """
+    user_id = enforce_user(user_id)
     try:
         if preference not in VALID_PREFERENCES:
             return {"error": f"Invalid preference '{preference}'. Must be one of: {sorted(VALID_PREFERENCES)}"}
@@ -1138,6 +1147,7 @@ def create_habit(user_id: str, title: str, frequency: str) -> dict:
     Returns on error:
       {"error": str}
     """
+    user_id = enforce_user(user_id)
     try:
         if frequency not in VALID_FREQUENCIES:
             return {"error": f"Invalid frequency '{frequency}'. Must be one of: {sorted(VALID_FREQUENCIES)}"}
@@ -1179,6 +1189,7 @@ def complete_habit(user_id: str, habit_id: str) -> dict:
     Returns on error:
       {"error": str}
     """
+    user_id = enforce_user(user_id)
     try:
         table = get_table()
 
@@ -1272,6 +1283,7 @@ def list_habits(user_id: str) -> dict:
     Returns on error:
       {"error": str}
     """
+    user_id = enforce_user(user_id)
     try:
         table = get_table()
 
