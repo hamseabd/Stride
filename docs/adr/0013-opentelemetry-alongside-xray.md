@@ -8,8 +8,8 @@ AWS X-Ray shows Lambda cold start, warm latency, and external service calls, but
 
 ## Decision
 
-Register a `TracerProvider` before Strands initializes its own. Root span per turn, with child spans for context assembly, classification, and each tool invocation. Instrument botocore so DynamoDB calls nest under their tool spans. Telemetry destination is optional: standard OTLP environment variables. When set, a Braintrust destination is remapped to avoid full-prompt export by default. When unset, tracing is inert.
+Register Stride's own `TracerProvider` at handler import, before Strands constructs its tracer. Strands' later `set_tracer_provider` call is ignored, so its agent, cycle, model and tool spans route through Stride's exporter. Open one root span per turn (`stride.sms.turn`, `stride.scheduler.run`) and a child span around the classifier. Instrument botocore so DynamoDB calls nest under the tool that made them. The destination is whatever the standard OTLP environment variables name; an optional vendor flag remaps `gen_ai` attributes for Braintrust. With no endpoint set, every call is a no-op.
 
 ## Consequences
 
-Full prompts leave the account only when the user explicitly enables export. X-Ray remains the primary production telemetry; OTel is a development and audit tool until proven in beta. The trace tree shows every tool cycle and its latency. Span names include the tool function name and the turn intent. Adding OTel increased Lambda package size by ~2 MB; startup latency is negligible.
+Spans carry full prompts and completions, so enabling export sends conversation content to the trace vendor. That is deliberate and documented in the app's conventions: it is what makes conversation-level debugging and production-traces-to-evals possible, and the privacy policy must name the vendor before real user traffic is exported. X-Ray stays on for both Lambdas until OpenTelemetry has been proven in production; removing it is a separate decision. Local runs can capture the same spans in memory (`chat.py --trace`) without any vendor.

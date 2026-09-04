@@ -1,6 +1,6 @@
 # What I'd do differently
 
-I shipped Stride's core loop in six weeks and landed six users in April 2026. These are the decisions I would reverse or time differently next time.
+These are the decisions I would make differently, written after running a six-user beta in April 2026.
 
 ## CI failures need an alert, not a badge
 
@@ -22,9 +22,9 @@ Next time, I will define Pydantic models for each tool's input up front and pass
 
 ## Measure the slowest path on day one
 
-Twilio's 15-second hard deadline for a TwiML response shaped the entire architecture. I built a REST fallback, added reply-deadline tokens to the prompt, and limited the history to 20 turns — all to stay under 12 seconds. Only after launch did I profile the slowest path: it was a planning-day conversation, hitting 16 seconds at the 99th percentile.
+Twilio's 15-second hard deadline for a TwiML response shaped the architecture more than any product decision. I built the 12-second cutoff and the REST fallback around it before I had measured a single turn. In the beta the slowest turn took 20 seconds against an average under three, so the fallback ran in production.
 
-Next time, I will load-test the agent with real-world prompts on day one. I will measure latency on the path that matters most (planning day) before deciding on architecture, not after.
+Next time I will measure the slowest path first, with real prompts, before deciding how to handle it.
 
 ## Observe habits at the beta scale, not in tests
 
@@ -40,9 +40,9 @@ Next time, I will file for A2P 10DLC and register consent flows on day one of an
 
 ## Ask timezone instead of inferring it
 
-I inferred the user's timezone from their phone's area code during onboarding, saving one message. It worked for four of six users. For two users who had moved, the inferred timezone was wrong, and the first proactive nudge landed at an odd hour (e.g., midnight). I had to ask manually and regenerate the schedule.
+I inferred each user's timezone from their phone's area code during onboarding, which saved one message. It was wrong for people who had moved, and their first proactive nudge landed at an odd hour.
 
-Next time, I will ask the user's timezone when the first nudge lands at an hour outside 7 AM – 10 PM local. The follow-up is only needed for people who moved; everyone else saves the message.
+Next time I will ask for the timezone when the first nudge lands at an odd hour. The follow-up is only needed for people who moved; everyone else still saves the message.
 
 ## Favor moto over LocalStack
 
