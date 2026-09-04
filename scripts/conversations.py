@@ -4,7 +4,7 @@ Review beta user conversations from DynamoDB.
 
 Usage:
   python scripts/conversations.py                       # all users, current conversation
-  python scripts/conversations.py --user +16124014226   # single user
+  python scripts/conversations.py --user +15551234567   # single user
   python scripts/conversations.py --all-users           # list all users with stats
   python scripts/conversations.py --feedback             # show all feedback records
 
