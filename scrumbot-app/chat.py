@@ -137,6 +137,15 @@ def start_trace_capture():
     trace.set_tracer_provider(provider)
     telemetry._provider = provider
     telemetry._instrument_botocore()
+
+    # Strands only builds its own Tracer (and calls get_tracer() from agent/event-loop/
+    # executor code) when OTEL_EXPORTER_OTLP_ENDPOINT or STRANDS_OTEL_ENABLE_CONSOLE_EXPORT
+    # is set; otherwise self.tracer stays None and no agent/model/tool spans are ever
+    # started. Setting the console flag makes Strands build a Tracer, but its own
+    # trace.set_tracer_provider() call loses the OTel "set once" race we already won above,
+    # so its ConsoleSpanExporter attaches only to its own orphaned TracerProvider — Strands'
+    # tracer.start_span() calls still resolve through the global provider we set, i.e. ours.
+    os.environ.setdefault("STRANDS_OTEL_ENABLE_CONSOLE_EXPORT", "true")
     return exporter
 
 
