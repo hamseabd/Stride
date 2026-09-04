@@ -237,8 +237,8 @@ def quality_report(hours: int) -> None:
     | stats
         avg(reply_length) as avg_len,
         max(reply_length) as max_len,
-        count(reply_length > 480) as over_limit,
-        count(reply_length > 300) as over_target,
+        sum(reply_length > 480) as over_limit,
+        sum(reply_length > 300) as over_target,
         count(*) as total
     """
     rows = _run_query(SMS_LOG_GROUP, len_query, hours)
