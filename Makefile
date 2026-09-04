@@ -1,4 +1,4 @@
-.PHONY: up down build push deploy test eval-l1 eval-l2 eval-classifier chat logs-sms logs-scheduler feedback feedback-user deploy-site analyze analyze-cost analyze-quality analyze-week conversations conversations-user conversations-all
+.PHONY: up down build push deploy test coverage eval-l1 eval-l2 eval-classifier chat logs-sms logs-scheduler feedback feedback-user deploy-site analyze analyze-cost analyze-quality analyze-week conversations conversations-user conversations-all
 
 # ── Config ────────────────────────────────────────────────────────────────────
 TABLE ?= stride-prod
@@ -13,6 +13,9 @@ down:
 test:
 	cd scrumbot-app && .venv/bin/python -m pytest tests/ -v
 
+coverage:
+	cd scrumbot-app && .venv/bin/python -m pytest tests/ -q --cov=shared --cov=functions --cov-report=term-missing:skip-covered
+
 eval-l1:
 	cd scrumbot-app && .venv/bin/python -m pytest evals/l1/test_assertions.py evals/regression/ -v --tb=short -m "not integration"
 
@@ -24,8 +27,12 @@ eval-l2:
 eval-classifier:
 	cd scrumbot-app && ANTHROPIC_API_KEY=$(ANTHROPIC_API_KEY) .venv/bin/python -m pytest evals/l1/test_classifier.py -v -m integration
 
+# Talk to the agent locally. Moto in-process by default (no Docker); ARGS passes flags through.
+#   make chat                                  interactive
+#   make chat ARGS="--script docs/examples/scripts/onboarding.txt"
+#   make chat ARGS="--localstack"              persist state in LocalStack (needs `make up`)
 chat:
-	cd scrumbot-app && PYTHONPATH=. .venv/bin/python chat.py
+	cd scrumbot-app && PYTHONPATH=. .venv/bin/python chat.py $(ARGS)
 
 # ── Build + push images ─────────────────────────────────────────────────────
 build:
@@ -82,7 +89,7 @@ conversations:
 	cd scrumbot-app && PYTHONPATH=. .venv/bin/python ../scripts/conversations.py
 
 conversations-user:
-	@test -n "$(USER)" || (echo "Usage: make conversations-user USER=+16124014226" && exit 1)
+	@test -n "$(USER)" || (echo "Usage: make conversations-user USER=+15551234567" && exit 1)
 	cd scrumbot-app && PYTHONPATH=. .venv/bin/python ../scripts/conversations.py --user $(USER)
 
 conversations-all:

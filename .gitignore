@@ -26,6 +26,9 @@ build/
 *.swp
 *.swo
 
+# Claude Code local state (worktrees, permissions)
+.claude/
+
 # OS
 .DS_Store
 Thumbs.db
@@ -49,9 +52,6 @@ override.tf.json
 crash.log
 .terraformrc
 terraform.rc
-
-scrumbot-app/local_server.py
-scrumbot-app/requirement-dev.txt
 
 # Dumped prod conversation traces for eval calibration — real user data, never commit
 scrumbot-app/evals/fixtures/raw/
