@@ -98,3 +98,93 @@ def test_bug_001_boundary_new_user_defaults_to_balanced(ddb):
     assert item.get("preferred_tone") == "balanced", (
         f"new user should default to 'balanced', got {item.get('preferred_tone')!r}"
     )
+
+
+def test_bug_002_tool_ignores_model_supplied_user_id(ddb):
+    """
+    BUG-002: tools trusted the user_id the model passed. The handler only told
+    the model the current id in the system prompt, so an injected SMS could
+    point the agent at another user's records. Fixed 2026-09 by binding the
+    authenticated user server-side; tools act on the bound id.
+    """
+    from shared.tenant import bind_user
+    from shared.tools import create_project, list_active_projects
+
+    victim = "+15550000021"
+    attacker = "+15550000022"
+    _seed_user(ddb, victim)
+    _seed_user(ddb, attacker)
+
+    with bind_user(attacker):
+        create_project(user_id=victim, name="Planted", description="", target_date="")
+
+    assert list_active_projects(user_id=victim)["projects"] == [], (
+        "BUG-002 regression: a project was written under a user the model named, not the bound user"
+    )
+    assert [p["name"] for p in list_active_projects(user_id=attacker)["projects"]] == ["Planted"]
+
+
+def test_bug_003_context_exposes_ids_the_tools_need(ddb):
+    """
+    BUG-003: the pre-loaded context listed projects and tasks by name only. With a short
+    history the model guessed ids — it passed a project name as project_id and fabricated
+    task ids — and then reported success on calls that had failed. Fixed 2026-09 (v2.3):
+    every project and task line carries its id and the context says never to guess one.
+    """
+    from datetime import date, timedelta
+    from functions.sms.handler import _build_user_context
+    from shared.tools import create_project, create_work_cycle, create_task
+
+    user_id = "+15550000031"
+    _seed_user(ddb, user_id)
+    project_id = create_project(user_id=user_id, name="Extension", description="", target_date="")["project_id"]
+    cycle_id = create_work_cycle(
+        project_id=project_id, name="Week 1", goal="Ship",
+        start_date=(date.today() + timedelta(days=1)).isoformat(),
+        end_date=(date.today() + timedelta(days=7)).isoformat(),
+    )["cycle_id"]
+    task_id = create_task(title="Blocklist UI", description="", estimate="M", cycle_id=cycle_id)["task_id"]
+
+    ctx = _build_user_context(user_id, {"planning_day": 1, "timezone": "America/New_York"}, is_new_user=False)
+    assert f"(id {project_id})" in ctx, "BUG-003 regression: project id missing from context"
+    assert f"(id {task_id})" in ctx, "BUG-003 regression: task id missing from context"
+
+
+def test_bug_004_tools_run_in_the_calling_thread(monkeypatch, ddb):
+    """
+    BUG-004: BUG-002's tenant binding is a ContextVar; Strands ran tools on a thread pool
+    where it is invisible, so tools still trusted the model's user_id in Lambda.
+    Fixed 2026-09 (v2.3): the Agent is built with max_parallel_tools=1.
+    """
+    from functions.sms import handler as sms_handler
+
+    captured = {}
+
+    class _Result:
+        class metrics:
+            accumulated_usage = {"inputTokens": 1, "outputTokens": 1, "totalTokens": 2}
+
+            @staticmethod
+            def get_summary():
+                return {"total_cycles": 1}
+
+        def __str__(self):
+            return "ok"
+
+    class _FakeAgent:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+            self.messages = []
+
+        def __call__(self, message):
+            return _Result()
+
+    user_id = "+15550000041"
+    _seed_user(ddb, user_id)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test")
+    monkeypatch.setattr(sms_handler, "Agent", _FakeAgent)
+    monkeypatch.setattr(sms_handler, "save_conversation", lambda *a, **k: None)
+    monkeypatch.setattr(sms_handler, "get_conversation", lambda uid: [])
+    sms_handler._call_agent(user_id=user_id, message="hi", is_new_user=False,
+                            user={"planning_day": 1, "timezone": "America/New_York"})
+    assert captured.get("max_parallel_tools") == 1, "BUG-004 regression: tools would run on worker threads"

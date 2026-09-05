@@ -73,7 +73,7 @@ scrumbot-app/                        ← you are here
 | ID | What it checks | Source |
 |---|---|---|
 | L1.1 | Response ≤ 480 chars | `shared/validators.py:44` |
-| L1.2 | No scrum jargon (sprint, story, standup...) | `shared/validators.py:18-22` |
+| L1.2 | No agile jargon in responses | `shared/validators.py:18-22` |
 | L1.3 | No raw "XL" size label leaked to user | `shared/validators.py:25` |
 | L1.4 | ≤ 1 question mark per response | `shared/validators.py:65` |
 | L1.5 | Response is non-empty | `shared/validators.py:37` |
