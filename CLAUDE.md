@@ -84,28 +84,20 @@ framework runs entirely under the hood; users never see it.
 
 ## CURRENT STATE
 
-**Deployed.** `POST /sms` live at `https://cbkpntvax6.execute-api.us-east-1.amazonaws.com`.
+**Live, small private beta.** Two Lambdas (`stride-sms`, `stride-scheduler`)
+on a personal AWS account, deployed by GitHub Actions on push to `main`.
+The public repo is a showcase of the agent system; nothing here is a growth plan.
 
-| Phase | Status |
+| Release | What landed |
 |---|---|
-| Sprint 0 — Jupyter notebooks, proof of concept | ✅ Done |
-| Sprint 1 — Terraform, Lambda stubs, SMS migration | ✅ Done |
-| Sprint 2 — Real handlers, consent flow, onboarding, deploy | ✅ Done |
-| Phase 3 — Proactive outbound SMS (scheduler, consent, tone derivation) | ✅ Done |
-| Phase 4 — Deploy + smoke test | ✅ Done |
-| Phase 5 — Production observability (telemetry, validation, analysis) | ✅ Done |
-| v1.1 — Coaching tone overhaul (prompt, onboarding, context, scheduler) | ✅ Done |
-| v2.0 — Prompt & flow revision (onboarding, timezone, session context, decomposition) | ✅ Done |
-| v2.1 — Onboarding overhaul (adaptive flow, too-long handling, multi-goal, blocked visibility) | ✅ Done |
+| v1.0 (2026-03) | Inbound agent, consent flow, single-table data model, proactive scheduler |
+| v1.1 – v2.1 (2026-03/04) | Coaching tone, timezone inference, adaptive onboarding, multi-goal |
+| v2.2 (2026-06) | Eval suite (L1 deterministic, L2 cross-family judge, regression), public README |
+| v2.3 (2026-09) | Tenant binding for tools, OpenTelemetry tracing, moto-backed local chat, ADRs and threat model |
 
-- Two Lambdas live: `stride-sms` (POST /sms) and `stride-scheduler` (EventBridge every 15 min).
-- 21 tools, 261 unit tests pass (moto-mocked DynamoDB); plus an eval suite (L1/L2/regression).
-- Twilio A2P 10DLC: approved (2026-03-23).
-- Legal pages (privacy policy, ToS) published on S3.
-- Agent telemetry: tokens, latency, cost, cache hits logged per call.
-- Response validation: jargon, length, empty checks before every send.
-- Prompt v2.1: adaptive onboarding, graceful too-long handling, multi-goal support.
-- **Next action: invite beta users** — system is ready.
+- 21 tools, unit tests + L1 evals gate every deploy; L2 judge runs nightly on Amazon Nova Pro.
+- Prompt caching: static prefix cached, per-user suffix dynamic (~73 % of prompt tokens from cache in the beta).
+- See `CHANGELOG.md` for detail and `docs/adr/` for why things are the way they are.
 
 See `scrumbot-app/CLAUDE.md` for the locked schema and detailed app-level conventions.
 
