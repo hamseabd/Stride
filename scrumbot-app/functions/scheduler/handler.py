@@ -9,6 +9,7 @@ Logic:
   2. For each user: timezone math → determine message type → dedup → send → log
 """
 
+import os
 import time
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -26,9 +27,14 @@ from shared.db import (
 )
 from shared.sms import send_sms
 from shared.tools import list_active_projects, get_cycle_data
+from shared.telemetry import init_telemetry, get_tracer, flush
 
 logger = Logger()
 tracer = Tracer()
+
+# Register our TracerProvider before anything else touches OpenTelemetry.
+# Inert unless OTEL_EXPORTER_OTLP_ENDPOINT is set (see shared/telemetry.py).
+init_telemetry(os.getenv("POWERTOOLS_SERVICE_NAME", "stride-scheduler"))
 
 # Opt-out footer appended to every outbound message
 _OPT_OUT_FOOTER = "\n\nReply NO REMINDERS to stop"
@@ -364,7 +370,20 @@ def _process_user(user_id: str) -> bool:
 @logger.inject_lambda_context
 @tracer.capture_lambda_handler
 def handler(event: dict, context: LambdaContext) -> dict:
-    """EventBridge entry point — process all consented users."""
+    """EventBridge entry point — process all consented users.
+
+    The root span must close before flush() runs, otherwise it is never exported.
+    """
+    try:
+        with get_tracer().start_as_current_span("stride.scheduler.run") as root:
+            return _run(root)
+    finally:
+        flush()
+
+
+def _run(root) -> dict:
+    """Body of one scheduler run. `root` is the current span; attributes on it
+    mirror the scheduler_metrics log line so a trace backend can chart runs."""
     t0 = time.monotonic()
     user_ids = get_consented_users()
     logger.info("Scheduler run", consented_users=len(user_ids))
@@ -385,5 +404,9 @@ def handler(event: dict, context: LambdaContext) -> dict:
                 sent_count=sent_count,
                 error_count=error_count,
                 run_duration_ms=run_duration_ms)
+    root.set_attribute("users_processed", len(user_ids))
+    root.set_attribute("sent_count", sent_count)
+    root.set_attribute("error_count", error_count)
+    root.set_attribute("run_duration_ms", run_duration_ms)
 
     return {"statusCode": 200, "processed": len(user_ids)}

@@ -3,6 +3,14 @@ locals {
     DYNAMODB_TABLE_NAME = var.dynamodb_table_name
     ENVIRONMENT         = var.environment
   }
+
+  otel_env = var.otel_exporter_otlp_endpoint != "" ? merge({
+    OTEL_EXPORTER_OTLP_ENDPOINT = var.otel_exporter_otlp_endpoint
+    OTEL_EXPORTER_OTLP_HEADERS  = var.otel_exporter_otlp_headers
+    }, var.otel_vendor != "" ? {
+    OTEL_VENDOR   = var.otel_vendor
+    OTEL_MODEL_ID = var.otel_model_id
+  } : {}) : {}
 }
 
 # ---------------------------------------------------------------------------
@@ -33,7 +41,7 @@ module "lambda_sms" {
     TWILIO_ACCOUNT_SID      = var.twilio_account_sid
     TWILIO_PHONE_NUMBER     = var.twilio_phone_number
     NOTIFY_PHONE            = var.notify_phone
-  })
+  }, local.otel_env)
 
   tags = {
     Project = "stride"
@@ -66,7 +74,7 @@ module "lambda_scheduler" {
     TWILIO_AUTH_TOKEN       = var.twilio_auth_token
     TWILIO_ACCOUNT_SID      = var.twilio_account_sid
     TWILIO_PHONE_NUMBER     = var.twilio_phone_number
-  })
+  }, local.otel_env)
 
   tags = {
     Project = "stride"

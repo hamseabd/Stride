@@ -49,3 +49,28 @@ variable "notify_phone" {
   type        = string
   default     = ""
 }
+
+variable "otel_exporter_otlp_endpoint" {
+  description = "OTLP base URL. Braintrust: https://api.braintrust.dev/otel — Dynatrace: https://<env>.live.dynatrace.com/api/v2/otlp. Empty disables tracing entirely."
+  type        = string
+  default     = ""
+}
+
+variable "otel_exporter_otlp_headers" {
+  description = "OTLP auth headers, comma-separated key=value pairs."
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
+variable "otel_vendor" {
+  description = "Set to \"braintrust\" to enable Braintrust attribute remapping. Empty leaves spans vendor-neutral."
+  type        = string
+  default     = ""
+}
+
+variable "otel_model_id" {
+  description = "Model id stamped onto model-invoke spans so Braintrust can price them. Only used when otel_vendor is braintrust."
+  type        = string
+  default     = "claude-sonnet-4-6"
+}
