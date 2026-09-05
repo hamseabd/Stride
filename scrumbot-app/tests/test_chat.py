@@ -116,3 +116,26 @@ def test_dump_spans_writes_parent_child_json(chat_module, tmp_path):
     assert by_name["root"]["parent_id"] is None
     assert by_name["root"]["attributes"]["k"] == "v"
     assert by_name["child"]["end_ns"] >= by_name["child"]["start_ns"]
+
+
+def test_run_turn_opens_root_span(chat_module, monkeypatch, ddb):
+    """Local turns get a root span so botocore spans have a parent, like the Lambda."""
+    from opentelemetry.sdk.trace import TracerProvider
+    from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+    from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+
+    exporter = InMemorySpanExporter()
+    provider = TracerProvider()
+    provider.add_span_processor(SimpleSpanProcessor(exporter))
+    monkeypatch.setattr(chat_module, "get_tracer", lambda: provider.get_tracer("t"))
+    monkeypatch.setattr(chat_module, "classify_intent", lambda m: "remind_me")
+    phone = "+15551234567"
+    chat_module.ensure_user(phone)
+
+    chat_module.run_turn(phone, "remind me")
+
+    spans = exporter.get_finished_spans()
+    assert [s.name for s in spans] == ["stride.chat.turn"]
+    assert spans[0].attributes["user.id"] == phone
+    assert spans[0].attributes["intent"] == "remind_me"
+    assert spans[0].attributes["tool_calls"] == 0

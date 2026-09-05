@@ -52,6 +52,7 @@ from shared.db import (
     record_proactive_consent, revoke_proactive_consent, store_feedback,
 )
 from shared.tenant import bind_user
+from shared.telemetry import get_tracer
 from shared.tools import list_active_projects
 from shared.validators import validate_response, MAX_SMS_CHARS
 from functions.sms.handler import (
@@ -137,6 +138,15 @@ def start_trace_capture():
     trace.set_tracer_provider(provider)
     telemetry._provider = provider
     telemetry._instrument_botocore()
+
+    # Strands only builds its own Tracer (and calls get_tracer() from agent/event-loop/
+    # executor code) when OTEL_EXPORTER_OTLP_ENDPOINT or STRANDS_OTEL_ENABLE_CONSOLE_EXPORT
+    # is set; otherwise self.tracer stays None and no agent/model/tool spans are ever
+    # started. Setting the console flag makes Strands build a Tracer, but its own
+    # trace.set_tracer_provider() call loses the OTel "set once" race we already won above,
+    # so its ConsoleSpanExporter attaches only to its own orphaned TracerProvider — Strands'
+    # tracer.start_span() calls still resolve through the global provider we set, i.e. ours.
+    os.environ.setdefault("STRANDS_OTEL_ENABLE_CONSOLE_EXPORT", "true")
     return exporter
 
 
@@ -182,7 +192,7 @@ def _segments(text: str) -> int:
     return max(1, math.ceil(len(text) / SMS_SEGMENT))
 
 
-def run_turn(phone: str, message: str) -> dict:
+def _run_turn(phone: str, message: str) -> dict:
     """Mirror of the handler's routing for one inbound SMS. Returns a record dict."""
     t0 = time.monotonic()
     intent = classify_intent(message)
@@ -238,6 +248,21 @@ def run_turn(phone: str, message: str) -> dict:
         "latency_ms": round((time.monotonic() - t0) * 1000),
         "cost_usd": round((inp * 3 + out * 15 + cr * 0.30 + cw * 3.75) / 1_000_000, 6),
     }
+
+
+def run_turn(phone: str, message: str) -> dict:
+    """One inbound SMS, wrapped in a root span like the Lambda's stride.sms.turn.
+
+    Without a root span the botocore spans have no parent (Strands does not make its
+    tool spans ambient), so a local trace would show them as loose roots.
+    """
+    with get_tracer().start_as_current_span("stride.chat.turn") as root:
+        root.set_attribute("user.id", phone)
+        rec = _run_turn(phone, message)
+        root.set_attribute("intent", rec["intent"])
+        root.set_attribute("reply_length", rec["chars"])
+        root.set_attribute("tool_calls", len(rec["tools"]))
+        return rec
 
 
 def _print_turn(rec: dict) -> None:

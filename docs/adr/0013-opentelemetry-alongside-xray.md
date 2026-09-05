@@ -8,7 +8,7 @@ AWS X-Ray shows Lambda cold start, warm latency, and external service calls, but
 
 ## Decision
 
-Register Stride's own `TracerProvider` at handler import, before Strands constructs its tracer. Strands' later `set_tracer_provider` call is ignored, so its agent, cycle, model and tool spans route through Stride's exporter. Open one root span per turn (`stride.sms.turn`, `stride.scheduler.run`) and a child span around the classifier. Instrument botocore so DynamoDB calls nest under the tool that made them. The destination is whatever the standard OTLP environment variables name; an optional vendor flag remaps `gen_ai` attributes for Braintrust. With no endpoint set, every call is a no-op.
+Register Stride's own `TracerProvider` at handler import, before Strands constructs its tracer. Strands' later `set_tracer_provider` call is ignored, so its agent, cycle, model and tool spans route through Stride's exporter. Open one root span per turn (`stride.sms.turn`, `stride.scheduler.run`) and a child span around the classifier. Instrument botocore so DynamoDB calls land in the same trace under the turn's root span; Strands does not make its tool spans ambient, so they sit beside the tool spans rather than inside them. The destination is whatever the standard OTLP environment variables name; an optional vendor flag remaps `gen_ai` attributes for Braintrust. With no endpoint set, every call is a no-op.
 
 ## Consequences
 
