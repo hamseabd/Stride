@@ -1,0 +1,13 @@
+{
+  "name": "Stride",
+  "image": "mcr.microsoft.com/devcontainers/python:3.12",
+  "postCreateCommand": "cd scrumbot-app && python -m venv .venv && .venv/bin/pip install -r requirements.txt -r requirements-dev.txt",
+  "customizations": {
+    "vscode": {
+      "extensions": ["ms-python.python", "hashicorp.terraform"]
+    }
+  },
+  "remoteEnv": {
+    "PYTHONPATH": "${containerWorkspaceFolder}/scrumbot-app"
+  }
+}

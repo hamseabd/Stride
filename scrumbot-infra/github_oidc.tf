@@ -201,6 +201,22 @@ data "aws_iam_policy_document" "github_terraform" {
       values   = ["lambda.amazonaws.com"]
     }
   }
+
+  # The nightly L2 eval judge (Amazon Nova Pro via Bedrock) runs under this role.
+  # Scoped to that one model: the cross-region inference profile plus the
+  # foundation-model ARN in every region the profile can route to.
+  statement {
+    sid    = "BedrockJudge"
+    effect = "Allow"
+    actions = [
+      "bedrock:InvokeModel",
+      "bedrock:InvokeModelWithResponseStream",
+    ]
+    resources = [
+      "arn:aws:bedrock:${var.aws_region}:*:inference-profile/us.amazon.nova-pro-v1:0",
+      "arn:aws:bedrock:*::foundation-model/amazon.nova-pro-v1:0",
+    ]
+  }
 }
 
 resource "aws_iam_role_policy" "github_terraform" {
