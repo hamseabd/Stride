@@ -53,10 +53,10 @@ scrumbot-app/
 └── tests/
 ```
 
-**Local-only files (gitignored):**
-- `chat.py` — interactive CLI for testing agent flows locally
-- `local_server.py` — Flask server mirroring the production API
-- `requirement-dev.txt` — dev dependencies (pytest, flask, aws-xray-sdk, etc.)
+**Local dev tools (tracked, not deployed):**
+- `chat.py`: interactive CLI for the agent; moto in-process by default, `--localstack` to persist, `--script`/`--record`/`--trace` for docs
+- `local_server.py`: Flask server mirroring the production API, run by `docker-compose`
+- `requirements-dev.txt`: dev dependencies (pytest, moto, pytest-cov)
 
 Never create files outside this structure without being told to.
 

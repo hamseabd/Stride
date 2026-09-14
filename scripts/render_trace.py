@@ -44,19 +44,20 @@ def render(ordered, width=900):
     t0 = ordered[0][0]["start_ns"]
     total = max(s["end_ns"] for s, _ in ordered) - t0 or 1
     label_w, row_h, top = 300, 22, 30
+    bar_area = width - label_w - 80  # right gutter so duration labels never clip or overlap
     height = top + row_h * len(ordered) + 30
     parts = [f'<rect width="{width}" height="{height}" fill="#ffffff"/>',
              f'<text x="12" y="20" font-size="13" font-family="Helvetica, Arial, sans-serif" fill="#374151">'
              f'One SMS turn · {total / 1e6:.0f} ms · {len(ordered)} spans</text>']
     for i, (s, depth) in enumerate(ordered):
         y = top + i * row_h
-        x0 = label_w + (s["start_ns"] - t0) / total * (width - label_w - 20)
-        w = max(2, (s["end_ns"] - s["start_ns"]) / total * (width - label_w - 20))
+        x0 = label_w + (s["start_ns"] - t0) / total * bar_area
+        w = max(2, (s["end_ns"] - s["start_ns"]) / total * bar_area)
         ms = (s["end_ns"] - s["start_ns"]) / 1e6
         name = s["name"] if len(s["name"]) <= 40 else s["name"][:37] + "..."
         parts.append(f'<text x="{12 + depth * 14}" y="{y + 15}" font-size="12" font-family="Menlo, Consolas, monospace" fill="#111827">{html.escape(name)}</text>')
         parts.append(f'<rect x="{x0:.1f}" y="{y + 4}" width="{w:.1f}" height="{row_h - 8}" rx="3" fill="{COLORS[kind(s["name"])]}"/>')
-        parts.append(f'<text x="{min(x0 + w + 6, width - 60):.1f}" y="{y + 15}" font-size="11" font-family="Helvetica, Arial, sans-serif" fill="#6b7280">{ms:.0f} ms</text>')
+        parts.append(f'<text x="{x0 + w + 6:.1f}" y="{y + 15}" font-size="11" font-family="Helvetica, Arial, sans-serif" fill="#6b7280">{ms:.0f} ms</text>')
     return (f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">'
             + "".join(parts) + "</svg>\n")
 

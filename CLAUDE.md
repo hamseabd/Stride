@@ -116,7 +116,7 @@ See `scrumbot-app/CLAUDE.md` for the locked schema and detailed app-level conven
 - Structured telemetry via Powertools Logger — `agent_metrics`, `classifier_metrics`, `scheduler_metrics`, `validation_warning`
 - Terraform state: S3 backend (`stride-tf-state`) + DynamoDB lock table (`stride-tf-locks`)
 - GitHub Actions workflow: `.github/workflows/terraform.yml` (repo root)
-- Local dev tools (`chat.py`, `local_server.py`, `requirement-dev.txt`) are gitignored — local only
+- Local dev tools are tracked: `chat.py` (moto in-process by default, `--localstack` to persist), `local_server.py` (Flask API behind `docker-compose`), `requirements-dev.txt`
 
 ---
 
