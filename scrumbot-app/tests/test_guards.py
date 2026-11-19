@@ -28,16 +28,16 @@ class TestCheckMessage:
         assert MAX_MESSAGE_LENGTH == 1600
 
     def test_long_multi_goal_message_passes(self):
-        """Real user message with multiple goals (like Malik's) should pass."""
-        malik_msg = (
-            "I want to set restrictive rules on my day to day schedule and "
-            "create goals in couple of different places in my life. "
-            "I want to achieve these goals by the remaining or end of the year. "
-            "I have a trucking automation software that I want to sale. "
-            "Now I want to have 10 clients that are paying by the end of the year. "
-            "I want to get a new software engineering 1 role at my company. "
-            "Also really important. My personal goal: get out of debt. "
-            "Currently in 11k debt. Gym 5 days a week. Gain 20 lbs. pray 5x a day."
+        """A long first message listing several goals at once should pass (synthetic text)."""
+        multi_goal_msg = (
+            "Hi, I'm Jordan. I have a few things I want to get done before the end of the year "
+            "and I keep starting them and dropping them. "
+            "First, I'm building a Chrome extension that blocks distracting sites "
+            "and I want it live on the Web Store by October. "
+            "After launch I'd like 50 people actually using it every week. "
+            "Second, I want to finish the online course on databases I bought last spring. "
+            "Third, I want to write one blog post a month about what I'm building. "
+            "Also, read 12 books this year and run a 10k in the fall."
         )
-        assert len(malik_msg) < MAX_MESSAGE_LENGTH
-        assert check_message(malik_msg) is None
+        assert len(multi_goal_msg) < MAX_MESSAGE_LENGTH
+        assert check_message(multi_goal_msg) is None
